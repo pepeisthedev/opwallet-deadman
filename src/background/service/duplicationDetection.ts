@@ -356,13 +356,14 @@ class DuplicationDetectionService extends EventEmitter {
         let isOnChainMatch = false; // Only true if MLDSA exists AND matches on-chain
 
         const networkType = preference.store.networkType;
+        const chainType = preference.store.chainType;
 
         // Derive Bitcoin address from pubkey using proper method
         try {
             address = publicKeyToAddressWithNetworkType(
                 pubkey,
                 addressType,
-                networkTypeToOPNet(networkType)
+                networkTypeToOPNet(networkType, chainType)
             );
         } catch (e) {
             console.error(`[DuplicationDetection] Address derivation failed for keyring ${keyringIndex}:`, e);

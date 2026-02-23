@@ -1,5 +1,6 @@
 import { NetworkType, RestoreWalletType } from '../types';
 import { AddressTypes } from '@btc-vision/transaction';
+import { ChainType } from './chainType';
 
 export enum CHAINS_ENUM {
     BTC = 'BTC'
@@ -132,27 +133,7 @@ export const RESTORE_WALLETS: { value: RestoreWalletType; name: string; addressT
     }
 ];
 
-export enum ChainType {
-    BITCOIN_MAINNET = 'BITCOIN_MAINNET',
-    BITCOIN_TESTNET = 'BITCOIN_TESTNET',
-    BITCOIN_TESTNET4 = 'BITCOIN_TESTNET4',
-    BITCOIN_REGTEST = 'BITCOIN_REGTEST',
-    BITCOIN_SIGNET = 'BITCOIN_SIGNET',
-    FRACTAL_BITCOIN_MAINNET = 'FRACTAL_BITCOIN_MAINNET',
-    FRACTAL_BITCOIN_TESTNET = 'FRACTAL_BITCOIN_TESTNET',
-    DOGECOIN_MAINNET = 'DOGECOIN_MAINNET',
-    DOGECOIN_TESTNET = 'DOGECOIN_TESTNET',
-    DOGECOIN_REGTEST = 'DOGECOIN_REGTEST',
-    LITECOIN_MAINNET = 'LITECOIN_MAINNET',
-    LITECOIN_TESTNET = 'LITECOIN_TESTNET',
-    LITECOIN_REGTEST = 'LITECOIN_REGTEST',
-    BITCOINCASH_MAINNET = 'BITCOINCASH_MAINNET',
-    BITCOINCASH_TESTNET = 'BITCOINCASH_TESTNET',
-    BITCOINCASH_REGTEST = 'BITCOINCASH_REGTEST',
-    DASH_MAINNET = 'DASH_MAINNET',
-    DASH_TESTNET = 'DASH_TESTNET',
-    DASH_REGTEST = 'DASH_REGTEST'
-}
+export { ChainType } from './chainType';
 
 export const NETWORK_TYPES = [
     { value: NetworkType.MAINNET, label: 'MAINNET', name: 'mainnet', validNames: [0, 'livenet', 'mainnet'] },
@@ -233,7 +214,7 @@ export const DEFAULT_CHAINS_MAP: { [key in ChainType]?: TypeChain<key> } = {
     },
     [ChainType.BITCOIN_TESTNET]: {
         enum: ChainType.BITCOIN_TESTNET,
-        label: 'Bitcoin Testnet',
+        label: 'Bitcoin Testnet3',
         unit: 'tBTC',
         icon: './images/artifacts/bitcoin-testnet.svg',
         networkType: NetworkType.TESTNET,
@@ -242,7 +223,23 @@ export const DEFAULT_CHAINS_MAP: { [key in ChainType]?: TypeChain<key> } = {
         mempoolSpaceUrl: 'https://mempool.space/testnet',
         faucetUrl: 'https://faucet.opnet.org/',
         okxExplorerUrl: '',
-        disable: false,
+        disable: true,
+        opnetDisabled: true,
+        showPrice: false,
+        defaultExplorer: 'mempool-space',
+        contractAddresses: {}
+    },
+    [ChainType.OPNET_TESTNET]: {
+        enum: ChainType.OPNET_TESTNET,
+        label: 'OPNet Testnet',
+        unit: 'tBTC',
+        icon: './images/artifacts/bitcoin-testnet.svg',
+        networkType: NetworkType.TESTNET,
+        opnetUrl: 'https://testnet.opnet.org',
+        endpoints: ['https://wallet.opnet.org'],
+        mempoolSpaceUrl: 'https://mempool.space/testnet',
+        faucetUrl: 'https://faucet.opnet.org/',
+        okxExplorerUrl: '',
         showPrice: false,
         defaultExplorer: 'mempool-space',
         contractAddresses: {}
@@ -328,6 +325,7 @@ export const DEFAULT_CHAINS_MAP: { [key in ChainType]?: TypeChain<key> } = {
         faucetUrl: 'https://fractal-faucet.opnet.org/',
         okxExplorerUrl: '',
         isViewTxHistoryInternally: true,
+        disable: true,
         isFractal: true,
         showPrice: false,
         defaultExplorer: 'mempool-space',

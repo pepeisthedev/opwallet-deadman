@@ -1,5 +1,7 @@
 import { AddressTypes, WalletNetworks } from '@btc-vision/transaction';
 
+import { ChainType } from '@/shared/constant/chainType';
+
 export enum LegacyAddressType {
     P2PKH = 0,
     P2WPKH = 1,
@@ -53,7 +55,12 @@ export enum NetworkType {
     REGTEST = 2
 }
 
-export function networkTypeToOPNet(networkType: NetworkType): WalletNetworks {
+export function networkTypeToOPNet(networkType: NetworkType, chainType?: ChainType): WalletNetworks {
+    // OPNet Testnet has its own distinct WalletNetworks value
+    if (chainType === ChainType.OPNET_TESTNET) {
+        return WalletNetworks.OpnetTestnet;
+    }
+
     switch (networkType) {
         case NetworkType.MAINNET:
             return WalletNetworks.Mainnet;

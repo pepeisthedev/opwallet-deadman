@@ -77,13 +77,15 @@ export function getBitcoinLibJSNetwork(networkType: NetworkType, chainType?: Cha
     if (chainType) {
         const chainConfig = customNetworksManager.getChain(chainType);
 
+        // OPNet Testnet uses its own network parameters (bech32: 'opt')
+        if (chainType === ChainType.OPNET_TESTNET) {
+            return networks.opnetTestnet;
+        }
+
         // Fractal chains use bitcoin network parameters even for testnet
         if (chainConfig?.isFractal || chainType.includes('FRACTAL')) {
             return networks.bitcoin;
         }
-
-        // Add custom network configurations here if needed
-        // For example, some chains might have their own network parameters
     }
 
     // Standard network type mapping

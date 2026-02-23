@@ -869,10 +869,11 @@ class AddressRotationService extends EventEmitter {
 
         // Get the taproot address
         const networkType = preferenceService.store.networkType;
+        const chainType = preferenceService.store.chainType;
         const address = publicKeyToAddressWithNetworkType(
             pubkey,
             AddressTypes.P2TR,
-            networkTypeToOPNet(networkType)
+            networkTypeToOPNet(networkType, chainType)
         );
 
         return { address, pubkey };

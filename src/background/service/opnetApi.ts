@@ -203,6 +203,7 @@ class OPNetAPI {
     private getChainAndNetwork(chainType: ChainType): { chain: string; network: string } {
         const chainMap: Record<string, { chain: string; network: string }> = {
             [ChainType.BITCOIN_MAINNET]: { chain: 'bitcoin', network: 'mainnet' },
+            [ChainType.OPNET_TESTNET]: { chain: 'bitcoin', network: 'testnet' },
             [ChainType.BITCOIN_TESTNET]: { chain: 'bitcoin', network: 'testnet' },
             [ChainType.BITCOIN_TESTNET4]: { chain: 'bitcoin', network: 'testnet4' },
             [ChainType.BITCOIN_REGTEST]: { chain: 'bitcoin', network: 'regtest' },
