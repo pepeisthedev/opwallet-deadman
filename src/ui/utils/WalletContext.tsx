@@ -2,7 +2,7 @@ import { ContactBookItem, ContactBookStore } from '@/background/service/contactB
 import { SavedVault, ToSignInput } from '@/background/service/keyring';
 import { PreSignedTransactionData, SerializedPreSignedInteractionData } from '@/background/service/notification';
 import { ConnectedSite } from '@/background/service/permission';
-import { AddressFlagType, ChainId, ChainType, CustomNetwork } from '@/shared/constant';
+import { AddressFlagType, ChainType, CustomNetwork } from '@/shared/constant';
 import {
     ConflictResolutionChoice,
     DuplicationDetectionResult,
@@ -278,8 +278,7 @@ export interface WalletController {
 
     addCustomNetwork(params: {
         name: string;
-        networkType: NetworkType;
-        chainId: ChainId;
+        chainType: ChainType;
         unit: string;
         opnetUrl: string;
         mempoolSpaceUrl: string;

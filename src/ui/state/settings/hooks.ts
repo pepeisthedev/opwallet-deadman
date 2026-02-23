@@ -72,6 +72,8 @@ export function useTxExplorerUrl(txId: string) {
             return `https://opscan.org/transactions/${txId}?network=testnet`;
         case ChainType.BITCOIN_REGTEST:
             return `https://opscan.org/transactions/${txId}?network=regtest`;
+        case ChainType.OPNET_TESTNET:
+            return `https://opscan.org/transactions/${txId}?network=testnet`;
         default:
             return `https://opscan.org/transactions/${txId}`;
     }
@@ -87,6 +89,8 @@ export function useAddressExplorerUrl(address: string) {
             return `https://opscan.org/accounts/${address}?network=testnet`;
         case ChainType.BITCOIN_REGTEST:
             return `https://opscan.org/accounts/${address}?network=regtest`;
+        case ChainType.OPNET_TESTNET:
+            return `https://opscan.org/accounts/${address}?network=testnet`;
         default:
             return `https://opscan.org/accounts/${address}`;
     }

@@ -112,8 +112,7 @@ import {
     publicKeyToAddressWithNetworkType,
     scriptPubKeyToAddress,
     signBip322MessageWithNetworkType,
-    SimpleKeyring,
-    toNetwork
+    SimpleKeyring
 } from '@btc-vision/wallet-sdk';
 
 import {
@@ -613,7 +612,7 @@ export class WalletController {
         }
 
         const networkType = this.getNetworkType();
-        const network = toNetwork(networkTypeToOPNet(networkType));
+        const network = getBitcoinLibJSNetwork(networkType, this.getChainType());
 
         const wif = EcKeyPair.fromPrivateKey(fromHex(privateKey), network).toWIF();
         return {
@@ -645,7 +644,7 @@ export class WalletController {
         }
 
         const networkType = this.getNetworkType();
-        const network = toNetwork(networkTypeToOPNet(networkType));
+        const network = getBitcoinLibJSNetwork(networkType, this.getChainType());
 
         const wif = EcKeyPair.fromPrivateKey(fromHex(privateKey), network).toWIF();
         return {
@@ -828,7 +827,7 @@ export class WalletController {
         const derivedAddress = publicKeyToAddressWithNetworkType(
             pubkey,
             addressType,
-            networkTypeToOPNet(this.getNetworkType())
+            networkTypeToOPNet(this.getNetworkType(), this.getChainType())
         );
 
         // Check if this address already exists in any keyring
@@ -1153,7 +1152,7 @@ export class WalletController {
         } else {
             // No custom toSignInputs => auto-detect
             const networkType = this.getNetworkType();
-            const psbtNetwork = toNetwork(networkTypeToOPNet(networkType));
+            const psbtNetwork = getBitcoinLibJSNetwork(networkType, this.getChainType());
 
             const psbt = typeof _psbt === 'string' ? Psbt.fromHex(_psbt, { network: psbtNetwork }) : _psbt;
 
@@ -1195,7 +1194,7 @@ export class WalletController {
         const __keyring = keyringService.keyrings[keyring.index];
 
         const networkType = this.getNetworkType();
-        const psbtNetwork = toNetwork(networkTypeToOPNet(networkType));
+        const psbtNetwork = getBitcoinLibJSNetwork(networkType, this.getChainType());
 
         if (!toSignInputs) {
             // For backward compatibility
@@ -1306,7 +1305,7 @@ export class WalletController {
         securityLevel: MLDSASecurityLevel
     ): boolean => {
         const networkType = this.getNetworkType();
-        const network = toNetwork(networkTypeToOPNet(networkType));
+        const network = getBitcoinLibJSNetwork(networkType, this.getChainType());
 
         // Create a dummy chain code (32 bytes of zeros) for verification purposes
         // The chain code is not used for signature verification
@@ -1800,7 +1799,7 @@ export class WalletController {
             const result = await signBip322MessageWithNetworkType(
                 message,
                 account.address,
-                networkTypeToOPNet(networkType),
+                networkTypeToOPNet(networkType, this.getChainType()),
                 async (psbt: Psbt) => {
                     const toSignInputs = await this.formatOptionsToSignInputs(psbt);
                     await this.signPsbt(psbt, toSignInputs, false);
@@ -1920,7 +1919,8 @@ export class WalletController {
         const currentChainType = this.getChainType();
         let baseChain = 'BITCOIN'; // default
 
-        if (currentChainType.includes('BITCOIN')) baseChain = 'BITCOIN';
+        if (currentChainType === ChainType.OPNET_TESTNET) baseChain = 'BITCOIN';
+        else if (currentChainType.includes('BITCOIN')) baseChain = 'BITCOIN';
         else if (currentChainType.includes('FRACTAL')) baseChain = 'FRACTAL_BITCOIN';
         else if (currentChainType.includes('DOGECOIN')) baseChain = 'DOGECOIN';
         else if (currentChainType.includes('LITECOIN')) baseChain = 'LITECOIN';
@@ -1935,7 +1935,9 @@ export class WalletController {
                 break;
             case NetworkType.TESTNET:
                 // Special cases for testnet
-                if (baseChain === 'BITCOIN' && currentChainType === ChainType.BITCOIN_TESTNET4) {
+                if (currentChainType === ChainType.OPNET_TESTNET) {
+                    newChainType = ChainType.OPNET_TESTNET;
+                } else if (baseChain === 'BITCOIN' && currentChainType === ChainType.BITCOIN_TESTNET4) {
                     newChainType = ChainType.BITCOIN_TESTNET4;
                 } else if (baseChain === 'BITCOIN' && currentChainType === ChainType.BITCOIN_SIGNET) {
                     newChainType = ChainType.BITCOIN_SIGNET;
@@ -2035,8 +2037,7 @@ export class WalletController {
 
     public addCustomNetwork = async (params: {
         name: string;
-        networkType: NetworkType;
-        chainId: ChainId;
+        chainType: ChainType;
         unit: string;
         opnetUrl: string;
         mempoolSpaceUrl: string;
@@ -2143,7 +2144,7 @@ export class WalletController {
 
         for (let j = 0; j < displayedKeyring.accounts.length; j++) {
             const { pubkey, quantumPublicKey } = displayedKeyring.accounts[j];
-            const address = publicKeyToAddressWithNetworkType(pubkey, addressType, networkTypeToOPNet(networkType));
+            const address = publicKeyToAddressWithNetworkType(pubkey, addressType, networkTypeToOPNet(networkType, this.getChainType()));
             const accountKey = `${key}#${j}`;
             const defaultName = this.getAlianName(pubkey) ?? this._generateAlianName(type, j + 1);
             const alianName = await preferenceService.getAccountAlianName(accountKey, defaultName);
@@ -2496,7 +2497,7 @@ export class WalletController {
      */
     public decodePsbt(psbtHex: string): DecodedPsbt {
         const networkType = this.getNetworkType();
-        const network = getBitcoinLibJSNetwork(networkType);
+        const network = getBitcoinLibJSNetwork(networkType, this.getChainType());
 
         const psbt = Psbt.fromHex(psbtHex, { network });
 

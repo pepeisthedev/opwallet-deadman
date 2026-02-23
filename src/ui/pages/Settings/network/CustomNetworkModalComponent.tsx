@@ -1,5 +1,4 @@
-import { CHAIN_ICONS, ChainId } from '@/shared/constant';
-import { NetworkType } from '@/shared/types';
+import { CHAINS_MAP, ChainType } from '@/shared/constant';
 import { Column, Image, Row, Text } from '@/ui/components';
 import { useTools } from '@/ui/components/ActionComponent';
 import { BottomModal } from '@/ui/components/BottomModal';
@@ -14,7 +13,7 @@ import {
     InfoCircleOutlined,
     LinkOutlined
 } from '@ant-design/icons';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 const colors = {
     main: '#f37413',
@@ -32,32 +31,23 @@ const colors = {
     warning: '#fbbf24'
 };
 
-interface NetworkOption {
-    value: NetworkType;
-    label: string;
-    description: string;
-}
-
-interface ChainOption {
-    value: ChainId;
+interface ChainTypeOption {
+    value: ChainType;
     label: string;
     icon: string;
+    unit: string;
+    family: string;
 }
 
-const NETWORK_OPTIONS: NetworkOption[] = [
-    { value: NetworkType.MAINNET, label: 'Mainnet', description: 'Production network' },
-    { value: NetworkType.TESTNET, label: 'Testnet', description: 'Test network' },
-    { value: NetworkType.REGTEST, label: 'Regtest', description: 'Local testing' }
-];
-
-const CHAIN_OPTIONS: ChainOption[] = [
-    { value: ChainId.Bitcoin, label: 'Bitcoin', icon: CHAIN_ICONS[ChainId.Bitcoin] },
-    { value: ChainId.Fractal, label: 'Fractal', icon: CHAIN_ICONS[ChainId.Fractal] },
-    { value: ChainId.Dogecoin, label: 'Dogecoin', icon: CHAIN_ICONS[ChainId.Dogecoin] },
-    { value: ChainId.Litecoin, label: 'Litecoin', icon: CHAIN_ICONS[ChainId.Litecoin] },
-    { value: ChainId.BitcoinCash, label: 'Bitcoin Cash', icon: CHAIN_ICONS[ChainId.BitcoinCash] },
-    { value: ChainId.Dash, label: 'Dash', icon: CHAIN_ICONS[ChainId.Dash] }
-];
+function getChainFamily(chainType: ChainType): string {
+    const ct = chainType as string;
+    if (ct.includes('FRACTAL')) return 'Fractal';
+    if (ct.includes('DOGECOIN')) return 'Dogecoin';
+    if (ct.includes('LITECOIN')) return 'Litecoin';
+    if (ct.includes('BITCOINCASH')) return 'Bitcoin Cash';
+    if (ct.includes('DASH')) return 'Dash';
+    return 'Bitcoin';
+}
 
 const InputField = ({
     label,
@@ -181,17 +171,60 @@ const InputField = ({
 export const AddCustomNetworkModal = ({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) => {
     const wallet = useWallet();
     const tools = useTools();
+
+    // Build chain type options from CHAINS_MAP, grouped by family
+    const { chainOptions, groupedOptions } = useMemo(() => {
+        const options: ChainTypeOption[] = [];
+        for (const [key, config] of Object.entries(CHAINS_MAP)) {
+            if (!config) continue;
+            const ct = key as ChainType;
+            options.push({
+                value: ct,
+                label: config.label,
+                icon: config.icon,
+                unit: config.unit,
+                family: getChainFamily(ct)
+            });
+        }
+
+        // Group by family, preserving enum order within each family
+        const grouped = new Map<string, ChainTypeOption[]>();
+        for (const opt of options) {
+            const group = grouped.get(opt.family) ?? [];
+            group.push(opt);
+            grouped.set(opt.family, group);
+        }
+
+        return { chainOptions: options, groupedOptions: grouped };
+    }, []);
+
+    const defaultChainType = ChainType.BITCOIN_MAINNET;
+    const defaultConfig = CHAINS_MAP[defaultChainType];
+
+    const [chainType, setChainType] = useState<ChainType>(defaultChainType);
     const [name, setName] = useState('');
-    const [networkType, setNetworkType] = useState<NetworkType>(NetworkType.MAINNET);
-    const [chainId, setChainId] = useState<ChainId>(ChainId.Bitcoin);
-    const [unit, setUnit] = useState('BTC');
+    const [unit, setUnit] = useState(defaultConfig?.unit ?? 'BTC');
     const [rpcUrl, setRpcUrl] = useState('');
-    const [explorerUrl, setExplorerUrl] = useState('https://mempool.space');
+    const [explorerUrl, setExplorerUrl] = useState(defaultConfig?.mempoolSpaceUrl ?? 'https://mempool.space');
     const [faucetUrl, setFaucetUrl] = useState('');
     const [showPrice, setShowPrice] = useState(false);
     const [testing, setTesting] = useState(false);
-    const [showNetworkDropdown, setShowNetworkDropdown] = useState(false);
     const [showChainDropdown, setShowChainDropdown] = useState(false);
+
+    const selectedOption = chainOptions.find((o) => o.value === chainType);
+
+    const handleChainTypeChange = (ct: ChainType) => {
+        setChainType(ct);
+        setShowChainDropdown(false);
+
+        // Auto-fill defaults from chain config
+        const config = CHAINS_MAP[ct];
+        if (config) {
+            setUnit(config.unit);
+            setExplorerUrl(config.mempoolSpaceUrl || 'https://mempool.space');
+            setShowPrice(config.showPrice);
+        }
+    };
 
     const handleSubmit = async () => {
         if (!name.trim()) {
@@ -220,8 +253,7 @@ export const AddCustomNetworkModal = ({ onClose, onSuccess }: { onClose: () => v
 
             await wallet.addCustomNetwork({
                 name: name.trim(),
-                networkType,
-                chainId,
+                chainType,
                 unit: unit.trim(),
                 opnetUrl: rpcUrl.trim(),
                 mempoolSpaceUrl: explorerUrl.trim(),
@@ -303,69 +335,6 @@ export const AddCustomNetworkModal = ({ onClose, onSuccess }: { onClose: () => v
                         required
                     />
 
-                    {/* Network Type Selector */}
-                    <div style={{ marginBottom: '16px' }}>
-                        <label
-                            style={{
-                                fontSize: '12px',
-                                fontWeight: 600,
-                                color: colors.textFaded,
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.5px',
-                                display: 'block',
-                                marginBottom: '6px'
-                            }}>
-                            Network Type <span style={{ color: colors.main }}>*</span>
-                        </label>
-                        <div
-                            style={{
-                                display: 'grid',
-                                gridTemplateColumns: 'repeat(3, 1fr)',
-                                gap: '8px'
-                            }}>
-                            {NETWORK_OPTIONS.map((option) => (
-                                <button
-                                    key={option.value}
-                                    style={{
-                                        padding: '8px',
-                                        background: networkType === option.value ? colors.main : colors.buttonHoverBg,
-                                        border: `1px solid ${networkType === option.value ? colors.main : colors.containerBorder}`,
-                                        borderRadius: '8px',
-                                        cursor: 'pointer',
-                                        transition: 'all 0.15s'
-                                    }}
-                                    onClick={() => setNetworkType(option.value)}
-                                    onMouseEnter={(e) => {
-                                        if (networkType !== option.value) {
-                                            e.currentTarget.style.background = colors.buttonBg;
-                                        }
-                                    }}
-                                    onMouseLeave={(e) => {
-                                        if (networkType !== option.value) {
-                                            e.currentTarget.style.background = colors.buttonHoverBg;
-                                        }
-                                    }}>
-                                    <div
-                                        style={{
-                                            fontSize: '12px',
-                                            fontWeight: 600,
-                                            color: networkType === option.value ? colors.background : colors.text
-                                        }}>
-                                        {option.label}
-                                    </div>
-                                    <div
-                                        style={{
-                                            fontSize: '10px',
-                                            color: networkType === option.value ? colors.background : colors.textFaded,
-                                            marginTop: '2px'
-                                        }}>
-                                        {option.description}
-                                    </div>
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
                     {/* Chain Type Dropdown */}
                     <div style={{ marginBottom: '16px', position: 'relative' }}>
                         <label
@@ -395,14 +364,14 @@ export const AddCustomNetworkModal = ({ onClose, onSuccess }: { onClose: () => v
                             }}
                             onClick={() => setShowChainDropdown(!showChainDropdown)}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                <Image src={CHAIN_OPTIONS.find((o) => o.value === chainId)?.icon || ''} size={20} />
+                                <Image src={selectedOption?.icon || ''} size={20} />
                                 <span
                                     style={{
                                         fontSize: '13px',
                                         color: colors.text,
                                         fontFamily: 'Inter-Regular, serif'
                                     }}>
-                                    {CHAIN_OPTIONS.find((o) => o.value === chainId)?.label || ''}
+                                    {selectedOption?.label || ''}
                                 </span>
                             </div>
                             <span
@@ -429,52 +398,68 @@ export const AddCustomNetworkModal = ({ onClose, onSuccess }: { onClose: () => v
                                     borderRadius: '10px',
                                     overflow: 'hidden',
                                     zIndex: 1000,
-                                    boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+                                    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                                    maxHeight: '250px',
+                                    overflowY: 'auto'
                                 }}>
-                                {CHAIN_OPTIONS.map((option) => (
-                                    <button
-                                        key={option.value}
-                                        style={{
-                                            width: '100%',
-                                            padding: '10px 12px',
-                                            background: 'transparent',
-                                            border: 'none',
-                                            borderBottom: `1px solid ${colors.containerBorder}`,
-                                            cursor: 'pointer',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '10px',
-                                            transition: 'all 0.15s'
-                                        }}
-                                        onClick={() => {
-                                            setChainId(option.value);
-                                            setShowChainDropdown(false);
-                                        }}
-                                        onMouseEnter={(e) => {
-                                            e.currentTarget.style.background = colors.buttonHoverBg;
-                                        }}
-                                        onMouseLeave={(e) => {
-                                            e.currentTarget.style.background = 'transparent';
-                                        }}>
-                                        <Image src={option.icon} size={20} />
-                                        <span
+                                {Array.from(groupedOptions.entries()).map(([family, options]) => (
+                                    <div key={family}>
+                                        <div
                                             style={{
-                                                fontSize: '13px',
-                                                color: colors.text,
-                                                fontFamily: 'Inter-Regular, serif'
+                                                padding: '6px 12px',
+                                                fontSize: '10px',
+                                                fontWeight: 700,
+                                                color: colors.textFaded,
+                                                textTransform: 'uppercase',
+                                                letterSpacing: '0.5px',
+                                                background: colors.containerBgFaded,
+                                                borderBottom: `1px solid ${colors.containerBorder}`
                                             }}>
-                                            {option.label}
-                                        </span>
-                                        {chainId === option.value && (
-                                            <CheckCircleFilled
+                                            {family}
+                                        </div>
+                                        {options.map((option) => (
+                                            <button
+                                                key={option.value}
                                                 style={{
-                                                    marginLeft: 'auto',
-                                                    fontSize: 14,
-                                                    color: colors.main
+                                                    width: '100%',
+                                                    padding: '8px 12px 8px 20px',
+                                                    background: 'transparent',
+                                                    border: 'none',
+                                                    borderBottom: `1px solid ${colors.containerBorder}`,
+                                                    cursor: 'pointer',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '10px',
+                                                    transition: 'all 0.15s'
                                                 }}
-                                            />
-                                        )}
-                                    </button>
+                                                onClick={() => handleChainTypeChange(option.value)}
+                                                onMouseEnter={(e) => {
+                                                    e.currentTarget.style.background = colors.buttonHoverBg;
+                                                }}
+                                                onMouseLeave={(e) => {
+                                                    e.currentTarget.style.background = 'transparent';
+                                                }}>
+                                                <Image src={option.icon} size={20} />
+                                                <span
+                                                    style={{
+                                                        fontSize: '13px',
+                                                        color: colors.text,
+                                                        fontFamily: 'Inter-Regular, serif'
+                                                    }}>
+                                                    {option.label}
+                                                </span>
+                                                {chainType === option.value && (
+                                                    <CheckCircleFilled
+                                                        style={{
+                                                            marginLeft: 'auto',
+                                                            fontSize: 14,
+                                                            color: colors.main
+                                                        }}
+                                                    />
+                                                )}
+                                            </button>
+                                        ))}
+                                    </div>
                                 ))}
                             </div>
                         )}

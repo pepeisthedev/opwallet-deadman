@@ -49,21 +49,14 @@ class CustomNetworksManager {
             },
             {
                 type: 'list',
-                label: 'Bitcoin Testnets',
+                label: 'Testnets',
                 icon: './images/artifacts/bitcoin-testnet-all.svg',
                 items: [
+                    this.getChain(ChainType.OPNET_TESTNET),
                     this.getChain(ChainType.BITCOIN_TESTNET),
                     this.getChain(ChainType.BITCOIN_TESTNET4),
                     this.getChain(ChainType.BITCOIN_SIGNET),
                     this.getChain(ChainType.BITCOIN_REGTEST)
-                ].filter(Boolean) as ConcreteTypeChain[]
-            },
-            {
-                type: 'list',
-                label: 'Fractal',
-                icon: './images/artifacts/fractal-mainnet.svg',
-                items: [
-                    this.getChain(ChainType.FRACTAL_BITCOIN_MAINNET)
                 ].filter(Boolean) as ConcreteTypeChain[]
             },
             {
@@ -147,8 +140,7 @@ class CustomNetworksManager {
 
     public async addCustomNetwork(params: {
         name: string;
-        networkType: NetworkType;
-        chainId: ChainId;
+        chainType: ChainType;
         unit: string;
         opnetUrl: string;
         mempoolSpaceUrl: string;
@@ -162,7 +154,7 @@ class CustomNetworksManager {
             throw new Error('Failed to connect to RPC endpoint');
         }
 
-        const chainType = this.getChainType(params.chainId, params.networkType);
+        const chainType = params.chainType;
 
         // Check if this combination already has a custom network
         const existing = Array.from(this.customNetworks.values()).find((n) => n.chainType === chainType);
@@ -171,16 +163,21 @@ class CustomNetworksManager {
             throw new Error('A custom network for this chain already exists. Please delete it first.');
         }
 
+        // Derive chainId and networkType from the chain config
+        const chainConfig = CHAINS_MAP[chainType];
+        const networkType = chainConfig?.networkType ?? NetworkType.MAINNET;
+        const chainId = this.getChainIdFromChainType(chainType);
+
         const id = `custom_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
-        // Get the appropriate icon based on chain and network type
-        const icon = this.getChainIcon(params.chainId, params.networkType);
+        // Get icon from chain config
+        const icon = chainConfig?.icon ?? './images/artifacts/custom-network.svg';
 
         const network: CustomNetwork = {
             id,
             name: params.name,
-            networkType: params.networkType,
-            chainId: params.chainId,
+            networkType,
+            chainId,
             chainType,
             icon,
             unit: params.unit,
@@ -376,56 +373,16 @@ class CustomNetworksManager {
         });
     }
 
-    private getChainType(chainId: ChainId, networkType: NetworkType): ChainType {
-        const chainIdNames: Record<ChainId, string> = {
-            [ChainId.Bitcoin]: 'BITCOIN',
-            [ChainId.Fractal]: 'FRACTAL_BITCOIN',
-            [ChainId.Dogecoin]: 'DOGECOIN',
-            [ChainId.Litecoin]: 'LITECOIN',
-            [ChainId.BitcoinCash]: 'BITCOINCASH',
-            [ChainId.Dash]: 'DASH'
-        };
-
-        const networkTypeNames: Record<NetworkType, string> = {
-            [NetworkType.MAINNET]: 'MAINNET',
-            [NetworkType.TESTNET]: 'TESTNET',
-            [NetworkType.REGTEST]: 'REGTEST'
-        };
-
-        const chainTypeName = `${chainIdNames[chainId]}_${networkTypeNames[networkType]}`;
-        return chainTypeName as ChainType;
+    private getChainIdFromChainType(chainType: ChainType): ChainId {
+        const chainTypeStr = chainType as string;
+        if (chainTypeStr.includes('FRACTAL')) return ChainId.Fractal;
+        if (chainTypeStr.includes('DOGECOIN')) return ChainId.Dogecoin;
+        if (chainTypeStr.includes('LITECOIN')) return ChainId.Litecoin;
+        if (chainTypeStr.includes('BITCOINCASH')) return ChainId.BitcoinCash;
+        if (chainTypeStr.includes('DASH')) return ChainId.Dash;
+        return ChainId.Bitcoin;
     }
 
-    private getChainIcon(chainId: ChainId, networkType: NetworkType): string {
-        // Special handling for Bitcoin networks
-        if (chainId === ChainId.Bitcoin) {
-            switch (networkType) {
-                case NetworkType.TESTNET:
-                    return './images/artifacts/bitcoin-testnet.svg';
-                case NetworkType.REGTEST:
-                    return './images/artifacts/bitcoin-testnet.svg'; // Using testnet icon for regtest
-                case NetworkType.MAINNET:
-                default:
-                    return './images/artifacts/bitcoin-mainnet.png';
-            }
-        }
-
-        // Special handling for Fractal networks
-        if (chainId === ChainId.Fractal) {
-            switch (networkType) {
-                case NetworkType.TESTNET:
-                case NetworkType.REGTEST:
-                    return './images/artifacts/fractal-testnet.svg';
-                case NetworkType.MAINNET:
-                default:
-                    return './images/artifacts/fractal-mainnet.svg';
-            }
-        }
-
-        // For other chains, use the default icon from CHAIN_ICONS
-        // You might want to add testnet-specific icons for other chains in the future
-        return CHAIN_ICONS[chainId] || './images/artifacts/custom-network.svg';
-    }
 }
 
 export const customNetworksManager = new CustomNetworksManager();

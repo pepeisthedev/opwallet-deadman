@@ -69,7 +69,8 @@ function Step1({ updateContextData }: { updateContextData: (params: UpdateContex
 
     const btnClick = async () => {
         const network = await wallet.getNetworkType();
-        const bitcoinNetwork = getBitcoinLibJSNetwork(network);
+        const chainType = await wallet.getChainType();
+        const bitcoinNetwork = getBitcoinLibJSNetwork(network, chainType);
 
         const raw = wif.trim();
         let keyKind: KeyKind | null = null;
@@ -370,7 +371,8 @@ function Step2({
     const run = async () => {
         setLoading(true);
         const network = await wallet.getNetworkType();
-        const bitcoinNetwork = getBitcoinLibJSNetwork(network);
+        const chainType = await wallet.getChainType();
+        const bitcoinNetwork = getBitcoinLibJSNetwork(network, chainType);
 
         const addresses: string[] = [];
         const balancesMap: Record<string, AddressAssets> = {};
@@ -625,7 +627,8 @@ function Step3({
             setLoading(true);
             try {
                 const network = await wallet.getNetworkType();
-                const bitcoinNetwork = getBitcoinLibJSNetwork(network);
+                const chainType = await wallet.getChainType();
+                const bitcoinNetwork = getBitcoinLibJSNetwork(network, chainType);
 
                 // Get the address for the selected address type
                 const kp =
@@ -708,7 +711,8 @@ function Step3({
     const computePublicKeyHash = async (quantumPrivateKeyHex: string): Promise<string | null> => {
         try {
             const network = await wallet.getNetworkType();
-            const bitcoinNetwork = getBitcoinLibJSNetwork(network);
+            const chainType = await wallet.getChainType();
+            const bitcoinNetwork = getBitcoinLibJSNetwork(network, chainType);
 
             // Extract just the private key part (without chain code)
             const privateKeyOnly = quantumPrivateKeyHex.slice(0, EXPECTED_QUANTUM_KEY_HEX_CHARS);
@@ -737,7 +741,8 @@ function Step3({
         setQuantumKeyError('');
 
         const network = await wallet.getNetworkType();
-        const bitcoinNetwork = getBitcoinLibJSNetwork(network);
+        const chainType = await wallet.getChainType();
+        const bitcoinNetwork = getBitcoinLibJSNetwork(network, chainType);
 
         try {
             const pk =

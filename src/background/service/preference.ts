@@ -80,8 +80,8 @@ const DEFAULTS = {
         firstOpen: false,
         currency: 'USD',
         addressType: AddressTypes.P2TR,
-        networkType: NetworkType.REGTEST, // DEFAULT NETWORK
-        chainType: ChainType.BITCOIN_REGTEST,
+        networkType: NetworkType.TESTNET, // DEFAULT NETWORK
+        chainType: ChainType.OPNET_TESTNET,
         keyringAlianNames: {},
         accountAlianNames: {},
         skippedVersion: '',
@@ -150,7 +150,7 @@ class PreferenceService {
         }
 
         if (!this.store.networkType) {
-            this.store.networkType = NetworkType.REGTEST;
+            this.store.networkType = NetworkType.TESTNET;
         }
 
         if (this.store.currentAccount) {
@@ -187,7 +187,7 @@ class PreferenceService {
         }
 
         if (!this.store.chainType) {
-            this.store.chainType = ChainType.BITCOIN_REGTEST;
+            this.store.chainType = ChainType.OPNET_TESTNET;
         }
 
         if (typeof this.store.autoLockTimeId !== 'number') {
@@ -354,8 +354,9 @@ class PreferenceService {
             throw new Error('Preference store is not initialized');
         }
 
-        if (!CHAINS.find((chain) => chain.enum === this.store.chainType)) {
-            this.store.chainType = ChainType.BITCOIN_REGTEST;
+        const chain = CHAINS.find((c) => c.enum === this.store.chainType);
+        if (!chain || chain.disable) {
+            this.store.chainType = ChainType.OPNET_TESTNET;
         }
 
         return this.store.chainType;
