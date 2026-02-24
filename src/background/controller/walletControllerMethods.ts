@@ -210,7 +210,15 @@ export const WALLET_CONTROLLER_METHODS = [
     'getNextUnusedRotationWallet',
     'getExperienceMode',
     'setExperienceMode',
-    'isExperienceModeSet'
+    'isExperienceModeSet',
+    'legacyVault_listVaults',
+    'legacyVault_getVault',
+    'legacyVault_createDraft',
+    'legacyVault_finalizeAndCreate',
+    'legacyVault_checkIn',
+    'legacyVault_trigger',
+    'legacyVault_claim',
+    'legacyVault_refresh'
 ] as const;
 
 export type WalletControllerMethod = (typeof WALLET_CONTROLLER_METHODS)[number];

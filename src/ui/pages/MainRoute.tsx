@@ -40,6 +40,11 @@ import BoostScreen from './Main/BoostScreen';
 import SettingsTabScreen from './Main/SettingsTabScreen';
 import WalletTabScreen from './Main/WalletTabScreen';
 import WelcomeScreen from './Main/WelcomeScreen';
+import LegacyVaultClaimScreen from './LegacyVault/LegacyVaultClaimScreen';
+import LegacyVaultCreateScreen from './LegacyVault/LegacyVaultCreateScreen';
+import LegacyVaultHomeScreen from './LegacyVault/LegacyVaultHomeScreen';
+import LegacyVaultReviewScreen from './LegacyVault/LegacyVaultReviewScreen';
+import LegacyVaultStatusScreen from './LegacyVault/LegacyVaultStatusScreen';
 import DeployContract from './OpNet/DeployContract';
 import Mint from './OpNet/Mint';
 import OpNetTokenScreen from './OpNet/OpNetTokenScreen';
@@ -294,6 +299,26 @@ export const routes: Routes = {
     [RouteTypes.DisplaySettingsScreen]: {
         path: routePaths[RouteTypes.DisplaySettingsScreen],
         element: <DisplaySettingsScreen />
+    },
+    [RouteTypes.LegacyVaultHomeScreen]: {
+        path: routePaths[RouteTypes.LegacyVaultHomeScreen],
+        element: <LegacyVaultHomeScreen />
+    },
+    [RouteTypes.LegacyVaultCreateScreen]: {
+        path: routePaths[RouteTypes.LegacyVaultCreateScreen],
+        element: <LegacyVaultCreateScreen />
+    },
+    [RouteTypes.LegacyVaultReviewScreen]: {
+        path: routePaths[RouteTypes.LegacyVaultReviewScreen],
+        element: <LegacyVaultReviewScreen />
+    },
+    [RouteTypes.LegacyVaultStatusScreen]: {
+        path: routePaths[RouteTypes.LegacyVaultStatusScreen],
+        element: <LegacyVaultStatusScreen />
+    },
+    [RouteTypes.LegacyVaultClaimScreen]: {
+        path: routePaths[RouteTypes.LegacyVaultClaimScreen],
+        element: <LegacyVaultClaimScreen />
     }
 };
 

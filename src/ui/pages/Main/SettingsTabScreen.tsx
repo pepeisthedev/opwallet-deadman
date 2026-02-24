@@ -134,6 +134,15 @@ const SettingList: Setting[] = [
         right: true
     },
     {
+        label: 'Legacy Vault',
+        value: '',
+        desc: 'Inheritance & deadman vaults',
+        icon: <LockOutlined />,
+        action: 'legacy-vault',
+        route: '/legacy-vault',
+        right: true
+    },
+    {
         desc: 'Expand View',
         icon: <ExpandOutlined />,
         action: 'expand-view',

@@ -7,12 +7,13 @@ import accounts from './accounts/reducer';
 import { updateVersion } from './global/actions';
 import global from './global/reducer';
 import keyrings from './keyrings/reducer';
+import legacyVault from './legacyVault/reducer';
 import rotation from './rotation/reducer';
 import settings from './settings/reducer';
 import transactions from './transactions/reducer';
 import ui from './ui/reducer';
 
-const PERSISTED_KEYS: string[] = ['ui'];
+const PERSISTED_KEYS: string[] = ['ui', 'legacyVault'];
 const store = configureStore({
     reducer: {
         accounts,
@@ -20,6 +21,7 @@ const store = configureStore({
         settings,
         global,
         keyrings,
+        legacyVault,
         rotation,
         ui
     },

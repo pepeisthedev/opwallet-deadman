@@ -55,7 +55,12 @@ export enum RouteTypes {
     ConsolidationScreen = 'ConsolidationScreen',
     ColdStorageWithdrawScreen = 'ColdStorageWithdrawScreen',
     UserExperienceModeScreen = 'UserExperienceModeScreen',
-    DisplaySettingsScreen = 'DisplaySettingsScreen'
+    DisplaySettingsScreen = 'DisplaySettingsScreen',
+    LegacyVaultHomeScreen = 'LegacyVaultHomeScreen',
+    LegacyVaultCreateScreen = 'LegacyVaultCreateScreen',
+    LegacyVaultReviewScreen = 'LegacyVaultReviewScreen',
+    LegacyVaultStatusScreen = 'LegacyVaultStatusScreen',
+    LegacyVaultClaimScreen = 'LegacyVaultClaimScreen'
 }
 
 export const routePaths: Record<RouteTypes, string> = {
@@ -112,7 +117,12 @@ export const routePaths: Record<RouteTypes, string> = {
     [RouteTypes.ConsolidationScreen]: '/settings/consolidation',
     [RouteTypes.ColdStorageWithdrawScreen]: '/settings/cold-storage-withdraw',
     [RouteTypes.UserExperienceModeScreen]: '/settings/experience-mode',
-    [RouteTypes.DisplaySettingsScreen]: '/settings/display'
+    [RouteTypes.DisplaySettingsScreen]: '/settings/display',
+    [RouteTypes.LegacyVaultHomeScreen]: '/legacy-vault',
+    [RouteTypes.LegacyVaultCreateScreen]: '/legacy-vault/create',
+    [RouteTypes.LegacyVaultReviewScreen]: '/legacy-vault/review',
+    [RouteTypes.LegacyVaultStatusScreen]: '/legacy-vault/status',
+    [RouteTypes.LegacyVaultClaimScreen]: '/legacy-vault/claim'
 };
 
 export type UseNavigate<T extends RouteTypes> = (routKey: T, state?: unknown) => void;

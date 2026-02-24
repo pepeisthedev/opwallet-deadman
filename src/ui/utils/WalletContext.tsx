@@ -34,6 +34,14 @@ import {
     OpnetCacheStats
 } from '@/shared/types/OpnetProtocol';
 import { TransactionHistoryFilter, TransactionHistoryItem } from '@/shared/types/TransactionHistory';
+import {
+    LegacyVaultActionResult,
+    LegacyVaultCreateInput,
+    LegacyVaultCreateResult,
+    LegacyVaultDetails,
+    LegacyVaultDraftResult,
+    LegacyVaultSummary
+} from '@/shared/types/LegacyVault';
 import { Psbt } from '@btc-vision/bitcoin';
 import { AddressTypes, InteractionParametersWithoutSigner } from '@btc-vision/transaction';
 import { createContext, ReactNode, useContext } from 'react';
@@ -370,6 +378,16 @@ export interface WalletController {
     addTrackedDomain(domainName: string): Promise<void>;
     removeTrackedDomain(domainName: string): Promise<void>;
     getPendingDomainTransfer(domainName: string): Promise<{ newOwner: string | null; initiatedAt: bigint }>;
+
+    // Legacy Vault (Deadman Wallet) MVP
+    legacyVault_listVaults(): Promise<LegacyVaultSummary[]>;
+    legacyVault_getVault(vaultId: string): Promise<LegacyVaultDetails | null>;
+    legacyVault_createDraft(input: LegacyVaultCreateInput): Promise<LegacyVaultDraftResult>;
+    legacyVault_finalizeAndCreate(input: LegacyVaultCreateInput): Promise<LegacyVaultCreateResult>;
+    legacyVault_checkIn(vaultId: string): Promise<LegacyVaultActionResult>;
+    legacyVault_trigger(vaultId: string): Promise<LegacyVaultActionResult>;
+    legacyVault_claim(vaultId: string, claimant?: string): Promise<LegacyVaultActionResult>;
+    legacyVault_refresh(vaultId: string): Promise<LegacyVaultDetails | null>;
 
     // Duplication detection and resolution
     checkForDuplicates(): Promise<DuplicationDetectionResult>;

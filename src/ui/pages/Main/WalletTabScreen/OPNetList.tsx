@@ -1,20 +1,23 @@
 import { CloseOutlined } from '@ant-design/icons';
 import { Modal } from 'antd';
 import BigNumber from 'bignumber.js';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import browser from 'webextension-polyfill';
 
 import Web3API from '@/shared/web3/Web3API';
 import { getContract, IOP20Contract, OP_20_ABI } from 'opnet';
 
 import { OPTokenInfo } from '@/shared/types';
+import { LegacyVaultSummary } from '@/shared/types/LegacyVault';
 import { Address, AddressTypes, AddressVerificator } from '@btc-vision/transaction';
 
 import { Column, OPNetLoader, Text } from '@/ui/components';
 import { useTools } from '@/ui/components/ActionComponent';
+import { useSimpleModeEnabled } from '@/ui/hooks/useExperienceMode';
 import OpNetBalanceCard from '@/ui/components/OpNetBalanceCard';
 import { useCurrentAccount } from '@/ui/state/accounts/hooks';
 import { useChain, useChainType } from '@/ui/state/settings/hooks';
+import { useWallet } from '@/ui/utils';
 
 import { faEye, faEyeSlash, faPencil, faPlus, faRefresh, faTrash } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -82,6 +85,8 @@ export function OPNetList() {
     const chainType = useChainType();
     const chain = useChain();
     const tools = useTools();
+    const wallet = useWallet();
+    const isSimpleMode = useSimpleModeEnabled();
 
     // Core state
     const [allTokenAddresses, setAllTokenAddresses] = useState<string[]>([]);
@@ -96,9 +101,105 @@ export function OPNetList() {
     const [showModal, setShowModal] = useState(false);
     const [modalToken, setModalToken] = useState<string | null>(null);
     const [migrationWarningShown, setMigrationWarningShown] = useState(false);
+    const [deadmanVaults, setDeadmanVaults] = useState<LegacyVaultSummary[]>([]);
+    const [isDeadmanLoading, setIsDeadmanLoading] = useState(false);
+    const [isDeadmanCheckingIn, setIsDeadmanCheckingIn] = useState(false);
+    const [deadmanNowTs, setDeadmanNowTs] = useState(Date.now());
 
     const storageKey = `opnetTokens_${chainType}_${currentAccount.pubkey}`;
     const initializationKey = `opnetTokens_initialized_${chainType}_${currentAccount.pubkey}`;
+
+    const loadDeadmanVaults = useCallback(async () => {
+        if (!isSimpleMode) {
+            setDeadmanVaults([]);
+            return;
+        }
+
+        setIsDeadmanLoading(true);
+        try {
+            const list = await wallet.legacyVault_listVaults();
+            setDeadmanVaults(list);
+        } catch (error) {
+            console.error('Failed to load Deadman vaults:', error);
+            setDeadmanVaults([]);
+        } finally {
+            setIsDeadmanLoading(false);
+        }
+    }, [isSimpleMode, wallet]);
+
+    useEffect(() => {
+        if (!isSimpleMode) return;
+
+        setDeadmanNowTs(Date.now());
+        const timer = window.setInterval(() => {
+            setDeadmanNowTs(Date.now());
+        }, 1000);
+
+        return () => window.clearInterval(timer);
+    }, [isSimpleMode]);
+
+    useEffect(() => {
+        void loadDeadmanVaults();
+    }, [loadDeadmanVaults, currentAccount.pubkey, chainType]);
+
+    const quickDeadmanVault = useMemo(() => {
+        if (deadmanVaults.length === 0) return null;
+
+        const actionable = deadmanVaults.filter((vault) => vault.status !== 'CLAIMED');
+        if (actionable.length === 0) {
+            return deadmanVaults[0];
+        }
+
+        return [...actionable].sort((a, b) => a.nextDeadlineTs - b.nextDeadlineTs)[0];
+    }, [deadmanVaults]);
+
+    const formatDeadmanCountdown = (targetTs: number): string => {
+        const deltaMs = targetTs - deadmanNowTs;
+        const absMs = Math.abs(deltaMs);
+        const totalSeconds = Math.floor(absMs / 1000);
+        const days = Math.floor(totalSeconds / 86400);
+        const hours = Math.floor((totalSeconds % 86400) / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+
+        const hhmmss = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds
+            .toString()
+            .padStart(2, '0')}`;
+        const body = days > 0 ? `${days}d ${hhmmss}` : hhmmss;
+
+        return deltaMs >= 0 ? body : `-${body}`;
+    };
+
+    const handleQuickDeadmanCheckIn = useCallback(async () => {
+        if (!quickDeadmanVault || isDeadmanCheckingIn) return;
+
+        setIsDeadmanCheckingIn(true);
+        try {
+            const result = await wallet.legacyVault_checkIn(quickDeadmanVault.vaultId);
+            if (!result.ok) {
+                tools.toastError(result.error || 'Deadman check-in failed');
+                return;
+            }
+
+            tools.toastSuccess('Deadman check-in recorded');
+            await loadDeadmanVaults();
+        } catch (error) {
+            console.error('Deadman check-in failed:', error);
+            tools.toastError('Deadman check-in failed');
+        } finally {
+            setIsDeadmanCheckingIn(false);
+        }
+    }, [isDeadmanCheckingIn, loadDeadmanVaults, quickDeadmanVault, tools, wallet]);
+
+    const quickDeadmanCountdownText = useMemo(() => {
+        if (!quickDeadmanVault) return 'No Deadman vault found';
+
+        if (quickDeadmanVault.status === 'CLAIMED') {
+            return 'Vault claimed';
+        }
+
+        return formatDeadmanCountdown(quickDeadmanVault.nextDeadlineTs);
+    }, [quickDeadmanVault, deadmanNowTs]);
 
     // Ensure default tokens are included only on first launch
     const ensureDefaultTokens = useCallback(
@@ -520,7 +621,7 @@ export function OPNetList() {
                     borderBottom: `1px solid ${colors.headerBorder}`,
                     borderTop: `1px solid ${colors.headerBorder}`,
                     padding: `12px`,
-                    margin: '0 -12px 12px -12px',
+                    margin: isSimpleMode ? '0 -12px 0 -12px' : '0 -12px 12px -12px',
                     background: colors.headerBG
                 }}>
                 <button
@@ -563,6 +664,88 @@ export function OPNetList() {
                     />
                 </button>
             </div>
+
+            {isSimpleMode && (
+                <div
+                    style={{
+                        width: 'calc(100% + 24px)',
+                        margin: '0 -12px 12px -12px',
+                        background: colors.headerBG,
+                        border: `1px solid ${colors.headerBorder}`,
+                        borderTop: 'none',
+                        borderRadius: '0',
+                        padding: '10px 12px'
+                    }}>
+                    <div
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '8px'
+                        }}>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                            <div
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '8px',
+                                    minWidth: 0
+                                }}>
+                                <span
+                                    style={{
+                                        fontSize: '12px',
+                                        color: colors.text,
+                                        fontWeight: 600,
+                                        whiteSpace: 'nowrap'
+                                    }}>
+                                    Deadman
+                                </span>
+                                <span
+                                    style={{
+                                        fontSize: '11px',
+                                        color:
+                                            quickDeadmanVault && quickDeadmanVault.nextDeadlineTs <= deadmanNowTs
+                                                ? colors.error
+                                                : colors.textFaded,
+                                        fontFamily: 'ProtoMono-Regular, monospace',
+                                        whiteSpace: 'nowrap'
+                                    }}>
+                                    {isDeadmanLoading ? 'Loading...' : quickDeadmanCountdownText}
+                                </span>
+                            </div>
+                        </div>
+
+                        <button
+                            style={{
+                                ...tokenButtonStyle,
+                                flex: '0 0 auto',
+                                height: '32px',
+                                padding: '0 12px',
+                                background:
+                                    !quickDeadmanVault || quickDeadmanVault.status === 'CLAIMED' || isDeadmanLoading
+                                        ? colors.headerBG
+                                        : tokenButtonStyle.background,
+                                color:
+                                    !quickDeadmanVault || quickDeadmanVault.status === 'CLAIMED' || isDeadmanLoading
+                                        ? colors.textFaded
+                                        : 'white',
+                                cursor:
+                                    !quickDeadmanVault || quickDeadmanVault.status === 'CLAIMED' || isDeadmanLoading
+                                        ? 'not-allowed'
+                                        : 'pointer'
+                            }}
+                            onClick={handleQuickDeadmanCheckIn}
+                            disabled={
+                                !quickDeadmanVault ||
+                                quickDeadmanVault.status === 'CLAIMED' ||
+                                isDeadmanCheckingIn ||
+                                isDeadmanLoading
+                            }>
+                            {isDeadmanCheckingIn ? 'Checking…' : 'Check-in'}
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* Token List */}
             {allTokenAddresses.length > 0 ? (

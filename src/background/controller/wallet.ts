@@ -1,12 +1,19 @@
-import { BitcoinUtils, BroadcastedTransaction, getContract, UTXOs } from 'opnet';
+import { BitcoinUtils, BroadcastedTransaction, getContract, UTXOs, TransactionParameters } from 'opnet';
 
 import { BTC_NAME_RESOLVER_ABI } from '@/shared/web3/abi/BTC_NAME_RESOLVER_ABI';
+import { LEGACY_VAULT_STATE_MACHINE_ABI } from '@/shared/web3/abi/LEGACY_VAULT_STATE_MACHINE_ABI';
 import { IBtcNameResolverContract } from '@/shared/web3/interfaces/IBtcNameResolverContract';
+import {
+    ILegacyVaultStateMachineContract,
+    LegacyVaultStatusCode
+} from '@/shared/web3/interfaces/ILegacyVaultStateMachineContract';
 
 import addressRotationService from '@/background/service/addressRotation';
 import contactBookService from '@/background/service/contactBook';
 import duplicationBackupService from '@/background/service/duplicationBackup';
 import duplicationDetectionService from '@/background/service/duplicationDetection';
+import { getLegacyVaultStateMachineAddress } from '@/background/service/legacyVault/legacyVaultContractConfig';
+import legacyVaultService from '@/background/service/legacyVault/LegacyVaultService';
 import keyringService, {
     DisplayedKeyring,
     EmptyKeyring,
@@ -75,6 +82,15 @@ import {
     DuplicationState,
     OnChainLinkageInfo
 } from '@/shared/types/Duplication';
+import {
+    LegacyVaultActionResult,
+    LegacyVaultCreateInput,
+    LegacyVaultCreateResult,
+    LegacyVaultDetails,
+    LegacyVaultDraftResult,
+    LegacyVaultStatus,
+    LegacyVaultSummary
+} from '@/shared/types/LegacyVault';
 import {
     AddressRotationState,
     ConsolidationParams,
@@ -169,6 +185,23 @@ export class WalletControllerError extends Error {
 }
 
 const stashKeyrings: Record<string, Keyring> = {};
+const LEGACY_VAULT_BPS_TOTAL = 10000;
+const LEGACY_VAULT_BLOCK_SECONDS_ESTIMATE = 60;
+const LEGACY_VAULT_BLOCK_MS_ESTIMATE = LEGACY_VAULT_BLOCK_SECONDS_ESTIMATE * 1000;
+const LEGACY_VAULT_MAX_PAYOUT_REF_BYTES = 200;
+
+const LEGACY_VAULT_UNIT_TO_SECONDS = {
+    minutes: 60,
+    hours: 60 * 60,
+    days: 60 * 60 * 24
+} as const;
+
+interface LegacyVaultContractContext {
+    account: Account;
+    walletSigner: Wallet;
+    contractAddress: string;
+    contract: ILegacyVaultStateMachineContract;
+}
 
 /**
  * Parse a raw transaction hex into structured data for UI display.
@@ -4152,6 +4185,573 @@ export class WalletController {
         }
 
         await addressRotationService.markConsolidated(account.pubkey, addresses, consolidatedAmount);
+    };
+
+    // Legacy Vault (Deadman Wallet) contract-backed methods (with local metadata mirror fallback)
+    private getLegacyVaultContractContext = async (): Promise<LegacyVaultContractContext | null> => {
+        const chainType = this.getChainType();
+        const contractAddress = getLegacyVaultStateMachineAddress(chainType);
+        if (!contractAddress) {
+            return null;
+        }
+
+        await Web3API.setNetwork(chainType);
+
+        const account = await this.getCurrentAccount();
+        if (!account) {
+            throw new WalletControllerError('No current account');
+        }
+
+        const walletSigner = await this.getWalletSigner();
+        const contract = getContract<ILegacyVaultStateMachineContract>(
+            contractAddress,
+            LEGACY_VAULT_STATE_MACHINE_ABI,
+            Web3API.provider,
+            Web3API.network,
+            walletSigner.address
+        );
+
+        return {
+            account,
+            walletSigner,
+            contractAddress,
+            contract
+        };
+    };
+
+    private parseLegacyVaultNumericId = (vaultId: string): bigint | null => {
+        const trimmed = vaultId.trim();
+        if (!/^\d+$/.test(trimmed)) {
+            return null;
+        }
+
+        try {
+            return BigInt(trimmed);
+        } catch {
+            return null;
+        }
+    };
+
+    private legacyVaultErrorMessage = (error: unknown, fallback: string): string => {
+        if (error instanceof Error && error.message) {
+            return error.message;
+        }
+
+        return fallback;
+    };
+
+    private legacyVaultAddressToString = (address: Address): string => {
+        try {
+            return address.p2op(Web3API.network);
+        } catch {
+            try {
+                return address.toString();
+            } catch {
+                return '';
+            }
+        }
+    };
+
+    private legacyVaultDurationToSeconds = (value: number, unit: LegacyVaultCreateInput['interval']['unit']): number => {
+        return Math.trunc(value) * LEGACY_VAULT_UNIT_TO_SECONDS[unit];
+    };
+
+    private legacyVaultSecondsToBlocks = (seconds: number, allowZero: boolean): number => {
+        if (!Number.isFinite(seconds) || seconds <= 0) {
+            return allowZero ? 0 : 1;
+        }
+
+        const blocks = Math.round(seconds / LEGACY_VAULT_BLOCK_SECONDS_ESTIMATE);
+        if (allowZero) {
+            return Math.max(0, blocks);
+        }
+
+        return Math.max(1, blocks);
+    };
+
+    private buildLegacyVaultMetadataHash = (input: LegacyVaultCreateInput): Uint8Array => {
+        const payload = JSON.stringify({
+            v: 1,
+            label: input.label,
+            amountSats: input.amountSats,
+            heirs: input.heirs.map((heir) => ({
+                label: heir.label || '',
+                address: heir.address,
+                shareBps: heir.shareBps
+            })),
+            interval: input.interval,
+            grace: input.grace,
+            mode: input.mode
+        });
+
+        return MessageSigner.sha256(fromUtf8(payload));
+    };
+
+    private buildLegacyVaultTxParams = (ctx: LegacyVaultContractContext, note: string): TransactionParameters => {
+        return {
+            signer: ctx.walletSigner.keypair,
+            mldsaSigner: ctx.walletSigner.mldsaKeypair,
+            refundTo: ctx.account.address,
+            maximumAllowedSatToSpend: 0n,
+            feeRate: 2,
+            network: Web3API.network,
+            priorityFee: 0n,
+            note,
+            linkMLDSAPublicKeyToAddress: true
+        };
+    };
+
+    private estimateLegacyVaultTimestampFromBlock = (
+        blockNumber: bigint,
+        currentBlock: bigint | undefined,
+        nowTs: number,
+        fallbackTs?: number
+    ): number => {
+        if (blockNumber <= 0n) {
+            return fallbackTs ?? nowTs;
+        }
+
+        if (currentBlock === undefined || currentBlock < blockNumber) {
+            return fallbackTs ?? nowTs;
+        }
+
+        const deltaBlocks = currentBlock - blockNumber;
+        const safeDelta = deltaBlocks > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(deltaBlocks);
+        return Math.max(0, nowTs - safeDelta * LEGACY_VAULT_BLOCK_MS_ESTIMATE);
+    };
+
+    private mapLegacyVaultContractStatus = (
+        statusCode: LegacyVaultStatusCode,
+        currentBlock: bigint | undefined,
+        lastCheckInBlock: bigint,
+        intervalBlocks: bigint,
+        graceBlocks: bigint
+    ): LegacyVaultStatus => {
+        if (statusCode === 3) {
+            return 'CLAIMED';
+        }
+
+        if (statusCode === 2) {
+            return 'CLAIMABLE';
+        }
+
+        if (statusCode !== 1) {
+            return 'ERROR';
+        }
+
+        if (currentBlock !== undefined) {
+            const deadlineBlock = lastCheckInBlock + intervalBlocks + graceBlocks;
+            if (currentBlock > deadlineBlock) {
+                return 'OVERDUE';
+            }
+        }
+
+        return 'ACTIVE';
+    };
+
+    private buildLegacyVaultDetailsFromContract = async (
+        vaultId: string,
+        contractVault: Awaited<ReturnType<ILegacyVaultStateMachineContract['getVault']>>,
+        currentBlock?: bigint
+    ): Promise<LegacyVaultDetails | null> => {
+        const props = contractVault.properties;
+        if (!props.exists) {
+            return null;
+        }
+
+        const cached = await legacyVaultService.getVault(vaultId);
+        const nowTs = Date.now();
+
+        const intervalBlocks = props.intervalBlocks;
+        const graceBlocks = props.graceBlocks;
+        const intervalSec = Number(intervalBlocks) * LEGACY_VAULT_BLOCK_SECONDS_ESTIMATE;
+        const graceSec = Number(graceBlocks) * LEGACY_VAULT_BLOCK_SECONDS_ESTIMATE;
+
+        const lastCheckInTs = this.estimateLegacyVaultTimestampFromBlock(
+            props.lastCheckInBlock,
+            currentBlock,
+            nowTs,
+            cached?.lastCheckInTs
+        );
+        const deadlineBlock = props.lastCheckInBlock + intervalBlocks + graceBlocks;
+        const nextDeadlineTs = this.estimateLegacyVaultTimestampFromBlock(
+            deadlineBlock,
+            currentBlock,
+            nowTs,
+            lastCheckInTs + (intervalSec + graceSec) * 1000
+        );
+
+        const status = this.mapLegacyVaultContractStatus(
+            props.status,
+            currentBlock,
+            props.lastCheckInBlock,
+            intervalBlocks,
+            graceBlocks
+        );
+
+        const cachedHeirLabels = new Map(
+            (cached?.heirs || []).map((heir) => [heir.address.toLowerCase(), heir.label || ''])
+        );
+
+        const heirs = props.heirs.map((heirAddress, index) => {
+            const addressString = this.legacyVaultAddressToString(heirAddress);
+            const label = cachedHeirLabels.get(addressString.toLowerCase()) || undefined;
+            const shareBps = props.sharesBps[index] ?? 0;
+
+            return {
+                label,
+                address: addressString,
+                shareBps
+            };
+        });
+
+        const createdAtTs = this.estimateLegacyVaultTimestampFromBlock(
+            props.createdAtBlock,
+            currentBlock,
+            nowTs,
+            cached?.createdAtTs
+        );
+        const triggeredAtTs =
+            props.triggeredAtBlock > 0n
+                ? this.estimateLegacyVaultTimestampFromBlock(
+                      props.triggeredAtBlock,
+                      currentBlock,
+                      nowTs,
+                      cached?.triggeredAtTs
+                  )
+                : undefined;
+        const claimedAtTs =
+            props.claimedAtBlock > 0n
+                ? this.estimateLegacyVaultTimestampFromBlock(props.claimedAtBlock, currentBlock, nowTs, cached?.claimedAtTs)
+                : undefined;
+
+        return {
+            vaultId,
+            label: cached?.label || `Vault #${vaultId}`,
+            mode: 'opnet-managed',
+            status,
+            nextDeadlineTs,
+            lastCheckInTs,
+            amountSats: cached?.amountSats ?? 0,
+            heirsCount: heirs.length,
+            createdAtTs,
+            triggeredAtTs,
+            claimedAtTs,
+            intervalSec,
+            graceSec,
+            ownerAddress: this.legacyVaultAddressToString(props.owner) || cached?.ownerAddress,
+            heirs,
+            txRefs: cached?.txRefs || {},
+            notes:
+                cached?.notes ||
+                'OP_NET contract-backed vault. Metadata shown on this device may be partial if the vault was created elsewhere.'
+        };
+    };
+
+    private getLegacyVaultDetailsFromContract = async (
+        ctx: LegacyVaultContractContext,
+        vaultIdBigInt: bigint,
+        currentBlock?: bigint
+    ): Promise<LegacyVaultDetails | null> => {
+        const vaultId = vaultIdBigInt.toString();
+        const contractVault = await ctx.contract.getVault(vaultIdBigInt);
+        return this.buildLegacyVaultDetailsFromContract(vaultId, contractVault, currentBlock);
+    };
+
+    public legacyVault_listVaults = async (): Promise<LegacyVaultSummary[]> => {
+        const ctx = await this.getLegacyVaultContractContext();
+        if (!ctx) {
+            return legacyVaultService.listVaults();
+        }
+
+        try {
+            const [idsResult, currentBlock] = await Promise.all([
+                ctx.contract.getVaultIdsByOwner(ctx.walletSigner.address),
+                Web3API.provider.getBlockNumber().catch(() => undefined)
+            ]);
+
+            const vaultIds = [...idsResult.properties.vaultIds].reverse();
+            const details = await Promise.all(
+                vaultIds.map((vaultIdBigInt) => this.getLegacyVaultDetailsFromContract(ctx, vaultIdBigInt, currentBlock))
+            );
+
+            return details
+                .filter((vault): vault is LegacyVaultDetails => !!vault)
+                .map((vault) => ({
+                    vaultId: vault.vaultId,
+                    label: vault.label,
+                    mode: vault.mode,
+                    status: vault.status,
+                    nextDeadlineTs: vault.nextDeadlineTs,
+                    lastCheckInTs: vault.lastCheckInTs,
+                    amountSats: vault.amountSats,
+                    heirsCount: vault.heirsCount
+                }));
+        } catch (error) {
+            console.warn('LegacyVault: failed to list contract-backed vaults, falling back to local cache', error);
+            return legacyVaultService.listVaults();
+        }
+    };
+
+    public legacyVault_getVault = async (vaultId: string): Promise<LegacyVaultDetails | null> => {
+        const ctx = await this.getLegacyVaultContractContext();
+        if (!ctx) {
+            return legacyVaultService.getVault(vaultId);
+        }
+
+        const numericVaultId = this.parseLegacyVaultNumericId(vaultId);
+        if (numericVaultId === null) {
+            return legacyVaultService.getVault(vaultId);
+        }
+
+        try {
+            const currentBlock = await Web3API.provider.getBlockNumber().catch(() => undefined);
+            return await this.getLegacyVaultDetailsFromContract(ctx, numericVaultId, currentBlock);
+        } catch (error) {
+            console.warn(`LegacyVault: failed to read vault ${vaultId} from contract, falling back to local cache`, error);
+            return legacyVaultService.getVault(vaultId);
+        }
+    };
+
+    public legacyVault_createDraft = async (input: LegacyVaultCreateInput): Promise<LegacyVaultDraftResult> => {
+        return legacyVaultService.createDraft(input);
+    };
+
+    public legacyVault_finalizeAndCreate = async (input: LegacyVaultCreateInput): Promise<LegacyVaultCreateResult> => {
+        const ctx = await this.getLegacyVaultContractContext();
+        if (!ctx) {
+            const currentAccount = preferenceService.getCurrentAccount();
+            return legacyVaultService.finalizeAndCreateVault(input, currentAccount?.address);
+        }
+
+        const draft = legacyVaultService.createDraft(input);
+        if (!draft.ok || !draft.normalized) {
+            return {
+                ok: false,
+                error: draft.errors?.join(' ') || 'Invalid vault parameters.'
+            };
+        }
+
+        const normalized = draft.normalized;
+
+        try {
+            const heirs = normalized.heirs.map((heir) => Address.fromString(heir.address));
+            const sharesBps = normalized.heirs.map((heir) => heir.shareBps);
+            const totalBps = sharesBps.reduce((sum, value) => sum + value, 0);
+            if (totalBps !== LEGACY_VAULT_BPS_TOTAL) {
+                return { ok: false, error: 'Heir shares must sum to 10000 bps.' };
+            }
+
+            const intervalSec = this.legacyVaultDurationToSeconds(normalized.interval.value, normalized.interval.unit);
+            const graceSec = this.legacyVaultDurationToSeconds(normalized.grace.value, normalized.grace.unit);
+            const intervalBlocks = this.legacyVaultSecondsToBlocks(intervalSec, false);
+            const graceBlocks = this.legacyVaultSecondsToBlocks(graceSec, true);
+            const metadataHash = this.buildLegacyVaultMetadataHash(normalized);
+
+            const simulation = await ctx.contract.createVault(
+                heirs,
+                sharesBps,
+                BigInt(intervalBlocks),
+                BigInt(graceBlocks),
+                metadataHash
+            );
+
+            if (simulation.revert) {
+                return {
+                    ok: false,
+                    error: simulation.revert
+                };
+            }
+
+            const receipt = await simulation.sendTransaction(
+                this.buildLegacyVaultTxParams(ctx, `Legacy Vault: create ${normalized.label}`)
+            );
+
+            const txid = receipt.transactionId;
+            const vaultId = simulation.properties.vaultId.toString();
+
+            await legacyVaultService.cacheContractVaultCreate(
+                vaultId,
+                normalized,
+                this.legacyVaultAddressToString(ctx.walletSigner.address),
+                txid,
+                txid,
+                toHex(metadataHash)
+            );
+
+            const currentBlock = await Web3API.provider.getBlockNumber().catch(() => undefined);
+            const vault = await this.getLegacyVaultDetailsFromContract(ctx, simulation.properties.vaultId, currentBlock);
+
+            return {
+                ok: true,
+                vaultId,
+                txid,
+                receiptId: txid,
+                statusAfter: vault?.status || 'ACTIVE',
+                vault: vault || undefined
+            };
+        } catch (error) {
+            return {
+                ok: false,
+                error: this.legacyVaultErrorMessage(error, 'Failed to create vault on OP_NET contract.')
+            };
+        }
+    };
+
+    public legacyVault_checkIn = async (vaultId: string): Promise<LegacyVaultActionResult> => {
+        const ctx = await this.getLegacyVaultContractContext();
+        if (!ctx) {
+            return legacyVaultService.checkIn(vaultId);
+        }
+
+        const numericVaultId = this.parseLegacyVaultNumericId(vaultId);
+        if (numericVaultId === null) {
+            return legacyVaultService.checkIn(vaultId);
+        }
+
+        try {
+            const simulation = await ctx.contract.checkIn(numericVaultId);
+            if (simulation.revert) {
+                return { ok: false, error: simulation.revert };
+            }
+
+            const receipt = await simulation.sendTransaction(
+                this.buildLegacyVaultTxParams(ctx, `Legacy Vault: check-in ${vaultId}`)
+            );
+
+            await legacyVaultService.updateVaultTxRefs(
+                vaultId,
+                {
+                    lastCheckInTxId: receipt.transactionId,
+                    lastReceiptId: receipt.transactionId
+                },
+                {
+                    lastCheckInTs: Date.now(),
+                    triggeredAtTs: undefined
+                }
+            );
+
+            return {
+                ok: true,
+                vaultId,
+                txid: receipt.transactionId,
+                receiptId: receipt.transactionId,
+                statusAfter: 'ACTIVE'
+            };
+        } catch (error) {
+            return {
+                ok: false,
+                error: this.legacyVaultErrorMessage(error, 'Failed to check in vault on OP_NET contract.')
+            };
+        }
+    };
+
+    public legacyVault_trigger = async (vaultId: string): Promise<LegacyVaultActionResult> => {
+        const ctx = await this.getLegacyVaultContractContext();
+        if (!ctx) {
+            return legacyVaultService.trigger(vaultId);
+        }
+
+        const numericVaultId = this.parseLegacyVaultNumericId(vaultId);
+        if (numericVaultId === null) {
+            return legacyVaultService.trigger(vaultId);
+        }
+
+        try {
+            const simulation = await ctx.contract.trigger(numericVaultId);
+            if (simulation.revert) {
+                return { ok: false, error: simulation.revert };
+            }
+
+            const receipt = await simulation.sendTransaction(
+                this.buildLegacyVaultTxParams(ctx, `Legacy Vault: trigger ${vaultId}`)
+            );
+
+            await legacyVaultService.updateVaultTxRefs(
+                vaultId,
+                {
+                    triggerTxId: receipt.transactionId,
+                    lastReceiptId: receipt.transactionId
+                },
+                {
+                    triggeredAtTs: Date.now()
+                }
+            );
+
+            return {
+                ok: true,
+                vaultId,
+                txid: receipt.transactionId,
+                receiptId: receipt.transactionId,
+                statusAfter: 'CLAIMABLE'
+            };
+        } catch (error) {
+            return {
+                ok: false,
+                error: this.legacyVaultErrorMessage(error, 'Failed to trigger vault on OP_NET contract.')
+            };
+        }
+    };
+
+    public legacyVault_claim = async (vaultId: string, claimant?: string): Promise<LegacyVaultActionResult> => {
+        const ctx = await this.getLegacyVaultContractContext();
+        if (!ctx) {
+            return legacyVaultService.claim(vaultId);
+        }
+
+        const numericVaultId = this.parseLegacyVaultNumericId(vaultId);
+        if (numericVaultId === null) {
+            return legacyVaultService.claim(vaultId);
+        }
+
+        try {
+            let payoutRef = new Uint8Array();
+            const trimmedClaimant = claimant?.trim();
+            if (trimmedClaimant) {
+                const encoded = new Uint8Array(fromUtf8(`claimant:${trimmedClaimant}`));
+                payoutRef =
+                    encoded.length > LEGACY_VAULT_MAX_PAYOUT_REF_BYTES
+                        ? encoded.slice(0, LEGACY_VAULT_MAX_PAYOUT_REF_BYTES)
+                        : encoded;
+            }
+
+            const simulation = await ctx.contract.finalizeClaim(numericVaultId, payoutRef);
+            if (simulation.revert) {
+                return { ok: false, error: simulation.revert };
+            }
+
+            const receipt = await simulation.sendTransaction(
+                this.buildLegacyVaultTxParams(ctx, `Legacy Vault: finalize claim ${vaultId}`)
+            );
+
+            await legacyVaultService.updateVaultTxRefs(
+                vaultId,
+                {
+                    claimTxId: receipt.transactionId,
+                    lastReceiptId: receipt.transactionId
+                },
+                {
+                    claimedAtTs: Date.now()
+                }
+            );
+
+            return {
+                ok: true,
+                vaultId,
+                txid: receipt.transactionId,
+                receiptId: receipt.transactionId,
+                statusAfter: 'CLAIMED'
+            };
+        } catch (error) {
+            return {
+                ok: false,
+                error: this.legacyVaultErrorMessage(error, 'Failed to finalize claim on OP_NET contract.')
+            };
+        }
+    };
+
+    public legacyVault_refresh = async (vaultId: string): Promise<LegacyVaultDetails | null> => {
+        return this.legacyVault_getVault(vaultId);
     };
 
     /**
