@@ -4252,6 +4252,61 @@ export class WalletController {
         }
     };
 
+    private legacyVaultLooksLikeHexPublicKey = (value: string): boolean => {
+        const normalized = value.trim().replace(/^0x/i, '');
+        return (
+            (normalized.length === 64 || normalized.length === 66 || normalized.length === 130) &&
+            /^[0-9a-fA-F]+$/.test(normalized)
+        );
+    };
+
+    private legacyVaultResolveParticipantAddress = async (inputRaw: string, participantLabel: string): Promise<Address> => {
+        const input = inputRaw.trim();
+        const normalizedHex = input.replace(/^0x/i, '');
+
+        if (this.legacyVaultLooksLikeHexPublicKey(input)) {
+            try {
+                return Address.fromString(normalizedHex);
+            } catch {
+                throw new WalletControllerError(`Invalid ${participantLabel} public key hex: ${input}.`);
+            }
+        }
+
+        try {
+            const resolved = await Web3API.provider.getPublicKeyInfo(input, false);
+            if (!resolved || resolved.isDead()) {
+                throw new Error('public key not found');
+            }
+
+            return resolved;
+        } catch (error) {
+            const lower = input.toLowerCase();
+            const currentChain = this.getChainType();
+            const hints: string[] = [];
+
+            if (lower.startsWith('opt1') && currentChain !== ChainType.OPNET_TESTNET) {
+                hints.push('Switch to OPNet Testnet before using an opt1 address.');
+            }
+
+            hints.push(
+                `If this address has no OP_NET public key yet, enter the ${participantLabel} public key in hex (0x...).`
+            );
+
+            const causeMessage =
+                error instanceof Error &&
+                error.message &&
+                error.message.toLowerCase() !== 'public key not found'
+                    ? ` ${error.message}`
+                    : '';
+
+            throw new WalletControllerError(
+                `Could not resolve ${participantLabel} "${input}" to a public key for vault creation.${causeMessage} ${hints.join(
+                    ' '
+                )}`.trim()
+            );
+        }
+    };
+
     private legacyVaultDurationToSeconds = (value: number, unit: LegacyVaultCreateInput['interval']['unit']): number => {
         return Math.trunc(value) * LEGACY_VAULT_UNIT_TO_SECONDS[unit];
     };
@@ -4288,6 +4343,7 @@ export class WalletController {
     };
 
     private buildLegacyVaultTxParams = (ctx: LegacyVaultContractContext, note: string): TransactionParameters => {
+        void note; // Legacy Vault txs omit note metadata to avoid backend tx-decoder incompatibilities.
         return {
             signer: ctx.walletSigner.keypair,
             mldsaSigner: ctx.walletSigner.mldsaKeypair,
@@ -4296,9 +4352,52 @@ export class WalletController {
             feeRate: 2,
             network: Web3API.network,
             priorityFee: 0n,
-            note,
             linkMLDSAPublicKeyToAddress: true
         };
+    };
+
+    private legacyVaultSendSimulationWithPreflight = async (
+        simulation: {
+            signTransaction: (params: TransactionParameters, amountAddition?: bigint) => Promise<any>;
+            sendPresignedTransaction: (signedTx: any) => Promise<any>;
+        },
+        params: TransactionParameters
+    ): Promise<any> => {
+        // Sign first so we can validate raw tx hex locally before RPC broadcast.
+        const signedTx = await simulation.signTransaction(params);
+        let fundingTxId: string | undefined;
+        let interactionTxId = '';
+
+        try {
+            if (signedTx.fundingTransactionRaw) {
+                fundingTxId = Transaction.fromHex(signedTx.fundingTransactionRaw).getId();
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new WalletControllerError(`Legacy Vault funding transaction is malformed before broadcast: ${message}`);
+        }
+
+        try {
+            interactionTxId = Transaction.fromHex(signedTx.interactionTransactionRaw).getId();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new WalletControllerError(`Legacy Vault interaction transaction is malformed before broadcast: ${message}`);
+        }
+
+        try {
+            return await simulation.sendPresignedTransaction(signedTx);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            const compiledTargetScriptHex = typeof signedTx.compiledTargetScript === 'string' ? signedTx.compiledTargetScript : '';
+            const compiledTargetScriptBytes = compiledTargetScriptHex ? Math.floor(compiledTargetScriptHex.length / 2) : 0;
+            const fundingHexLen = typeof signedTx.fundingTransactionRaw === 'string' ? signedTx.fundingTransactionRaw.length : 0;
+            const interactionHexLen =
+                typeof signedTx.interactionTransactionRaw === 'string' ? signedTx.interactionTransactionRaw.length : 0;
+
+            throw new WalletControllerError(
+                `${message} [legacy-vault-debug fundingHexLen=${fundingHexLen} interactionHexLen=${interactionHexLen} compiledScriptBytes=${compiledTargetScriptBytes} fundingTxId=${fundingTxId || 'none'} interactionTxId=${interactionTxId}]`
+            );
+        }
     };
 
     private estimateLegacyVaultTimestampFromBlock = (
@@ -4459,9 +4558,10 @@ export class WalletController {
     };
 
     public legacyVault_listVaults = async (): Promise<LegacyVaultSummary[]> => {
+        const localVaults = await legacyVaultService.listVaults();
         const ctx = await this.getLegacyVaultContractContext();
         if (!ctx) {
-            return legacyVaultService.listVaults();
+            return localVaults;
         }
 
         try {
@@ -4475,7 +4575,7 @@ export class WalletController {
                 vaultIds.map((vaultIdBigInt) => this.getLegacyVaultDetailsFromContract(ctx, vaultIdBigInt, currentBlock))
             );
 
-            return details
+            const contractSummaries = details
                 .filter((vault): vault is LegacyVaultDetails => !!vault)
                 .map((vault) => ({
                     vaultId: vault.vaultId,
@@ -4487,9 +4587,15 @@ export class WalletController {
                     amountSats: vault.amountSats,
                     heirsCount: vault.heirsCount
                 }));
+
+            // Keep locally cached vaults visible if the contract owner index is empty/misaligned.
+            const seen = new Set(contractSummaries.map((vault) => vault.vaultId));
+            const merged = [...contractSummaries, ...localVaults.filter((vault) => !seen.has(vault.vaultId))];
+
+            return merged;
         } catch (error) {
             console.warn('LegacyVault: failed to list contract-backed vaults, falling back to local cache', error);
-            return legacyVaultService.listVaults();
+            return localVaults;
         }
     };
 
@@ -4506,7 +4612,8 @@ export class WalletController {
 
         try {
             const currentBlock = await Web3API.provider.getBlockNumber().catch(() => undefined);
-            return await this.getLegacyVaultDetailsFromContract(ctx, numericVaultId, currentBlock);
+            const contractVault = await this.getLegacyVaultDetailsFromContract(ctx, numericVaultId, currentBlock);
+            return contractVault || (await legacyVaultService.getVault(vaultId));
         } catch (error) {
             console.warn(`LegacyVault: failed to read vault ${vaultId} from contract, falling back to local cache`, error);
             return legacyVaultService.getVault(vaultId);
@@ -4535,8 +4642,19 @@ export class WalletController {
         const normalized = draft.normalized;
 
         try {
-            const heirs = normalized.heirs.map((heir) => Address.fromString(heir.address));
-            const sharesBps = normalized.heirs.map((heir) => heir.shareBps);
+            const heirs = await Promise.all(
+                normalized.heirs.map((heir, index) =>
+                    this.legacyVaultResolveParticipantAddress(heir.address, heir.label?.trim() || `heir ${index + 1}`)
+                )
+            );
+            const normalizedForContract: LegacyVaultCreateInput = {
+                ...normalized,
+                heirs: normalized.heirs.map((heir, index) => ({
+                    ...heir,
+                    address: this.legacyVaultAddressToString(heirs[index]) || heir.address
+                }))
+            };
+            const sharesBps = normalizedForContract.heirs.map((heir) => heir.shareBps);
             const totalBps = sharesBps.reduce((sum, value) => sum + value, 0);
             if (totalBps !== LEGACY_VAULT_BPS_TOTAL) {
                 return { ok: false, error: 'Heir shares must sum to 10000 bps.' };
@@ -4546,7 +4664,7 @@ export class WalletController {
             const graceSec = this.legacyVaultDurationToSeconds(normalized.grace.value, normalized.grace.unit);
             const intervalBlocks = this.legacyVaultSecondsToBlocks(intervalSec, false);
             const graceBlocks = this.legacyVaultSecondsToBlocks(graceSec, true);
-            const metadataHash = this.buildLegacyVaultMetadataHash(normalized);
+            const metadataHash = this.buildLegacyVaultMetadataHash(normalizedForContract);
 
             const simulation = await ctx.contract.createVault(
                 heirs,
@@ -4563,7 +4681,8 @@ export class WalletController {
                 };
             }
 
-            const receipt = await simulation.sendTransaction(
+            const receipt = await this.legacyVaultSendSimulationWithPreflight(
+                simulation,
                 this.buildLegacyVaultTxParams(ctx, `Legacy Vault: create ${normalized.label}`)
             );
 
@@ -4572,7 +4691,7 @@ export class WalletController {
 
             await legacyVaultService.cacheContractVaultCreate(
                 vaultId,
-                normalized,
+                normalizedForContract,
                 this.legacyVaultAddressToString(ctx.walletSigner.address),
                 txid,
                 txid,
@@ -4615,7 +4734,8 @@ export class WalletController {
                 return { ok: false, error: simulation.revert };
             }
 
-            const receipt = await simulation.sendTransaction(
+            const receipt = await this.legacyVaultSendSimulationWithPreflight(
+                simulation,
                 this.buildLegacyVaultTxParams(ctx, `Legacy Vault: check-in ${vaultId}`)
             );
 
@@ -4663,7 +4783,8 @@ export class WalletController {
                 return { ok: false, error: simulation.revert };
             }
 
-            const receipt = await simulation.sendTransaction(
+            const receipt = await this.legacyVaultSendSimulationWithPreflight(
+                simulation,
                 this.buildLegacyVaultTxParams(ctx, `Legacy Vault: trigger ${vaultId}`)
             );
 
@@ -4720,7 +4841,8 @@ export class WalletController {
                 return { ok: false, error: simulation.revert };
             }
 
-            const receipt = await simulation.sendTransaction(
+            const receipt = await this.legacyVaultSendSimulationWithPreflight(
+                simulation,
                 this.buildLegacyVaultTxParams(ctx, `Legacy Vault: finalize claim ${vaultId}`)
             );
 

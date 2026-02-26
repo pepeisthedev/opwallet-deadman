@@ -30,8 +30,7 @@ export default function LegacyVaultCreateScreen() {
     const [graceValue, setGraceValue] = useState('1');
     const [graceUnit, setGraceUnit] = useState<LegacyVaultTimeUnit>('minutes');
     const [heirs, setHeirs] = useState<HeirDraftRow[]>([
-        { label: 'Heir A', address: 'tb1qheirdemo0001xyz', sharePercent: '60' },
-        { label: 'Heir B', address: 'tb1qheirdemo0002xyz', sharePercent: '40' }
+        { label: 'Heir A', address: 'opt1p8drc8qg3ezvlczkh75g7valh9d576ller48gc8ydtgrv0de9t64ss82fda', sharePercent: '100' }
     ]);
     const [submitting, setSubmitting] = useState(false);
 

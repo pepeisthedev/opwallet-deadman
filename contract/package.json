@@ -1,0 +1,21 @@
+{
+  "name": "legacy-vault-opnet-contract",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "postinstall": "node scripts/fix-noble-hashes-exports.cjs",
+    "build:wasm": "asc src/index.ts --config asconfig.json --target release --uncheckedBehavior never",
+    "clean": "rm -rf build"
+  },
+  "dependencies": {
+    "@btc-vision/as-bignum": "^0.1.2",
+    "@btc-vision/btc-runtime": "rc"
+  },
+  "devDependencies": {
+    "@btc-vision/assemblyscript": "^0.29.2",
+    "@btc-vision/opnet-transform": "^1.1.0"
+  },
+  "overrides": {
+    "@noble/hashes": "2.0.1"
+  }
+}

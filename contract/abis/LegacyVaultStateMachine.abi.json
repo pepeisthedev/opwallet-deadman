@@ -1,0 +1,243 @@
+{
+    "functions": [
+        {
+            "name": "createVault",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "heirs",
+                    "type": "ARRAY_OF_ADDRESSES"
+                },
+                {
+                    "name": "sharesBps",
+                    "type": "ARRAY_OF_UINT16"
+                },
+                {
+                    "name": "intervalSec",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "graceSec",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "metadataHash",
+                    "type": "BYTES32"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "vaultId",
+                    "type": "UINT256"
+                }
+            ]
+        },
+        {
+            "name": "getVault",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "vaultId",
+                    "type": "UINT256"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "exists",
+                    "type": "BOOL"
+                },
+                {
+                    "name": "owner",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "status",
+                    "type": "UINT8"
+                },
+                {
+                    "name": "createdAtBlock",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "lastCheckInBlock",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "triggeredAtBlock",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "claimedAtBlock",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "intervalBlocks",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "graceBlocks",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "heirs",
+                    "type": "ARRAY_OF_ADDRESSES"
+                },
+                {
+                    "name": "sharesBps",
+                    "type": "ARRAY_OF_UINT16"
+                },
+                {
+                    "name": "metadataHash",
+                    "type": "BYTES32"
+                },
+                {
+                    "name": "payoutRef",
+                    "type": "BYTES"
+                }
+            ]
+        },
+        {
+            "name": "getVaultIdsByOwner",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "owner",
+                    "type": "ADDRESS"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "vaultIds",
+                    "type": "ARRAY_OF_UINT256"
+                }
+            ]
+        },
+        {
+            "name": "checkIn",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "vaultId",
+                    "type": "UINT256"
+                }
+            ],
+            "outputs": []
+        },
+        {
+            "name": "trigger",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "vaultId",
+                    "type": "UINT256"
+                }
+            ],
+            "outputs": []
+        },
+        {
+            "name": "finalizeClaim",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "vaultId",
+                    "type": "UINT256"
+                },
+                {
+                    "name": "payoutRef",
+                    "type": "BYTES"
+                }
+            ],
+            "outputs": []
+        }
+    ],
+    "events": [
+        {
+            "name": "VaultCreated",
+            "values": [
+                {
+                    "name": "vaultId",
+                    "type": "UINT256"
+                },
+                {
+                    "name": "owner",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "blockNum",
+                    "type": "UINT64"
+                }
+            ],
+            "type": "Event"
+        },
+        {
+            "name": "CheckedIn",
+            "values": [
+                {
+                    "name": "vaultId",
+                    "type": "UINT256"
+                },
+                {
+                    "name": "owner",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "blockNum",
+                    "type": "UINT64"
+                }
+            ],
+            "type": "Event"
+        },
+        {
+            "name": "Triggered",
+            "values": [
+                {
+                    "name": "vaultId",
+                    "type": "UINT256"
+                },
+                {
+                    "name": "triggeredBy",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "blockNum",
+                    "type": "UINT64"
+                }
+            ],
+            "type": "Event"
+        },
+        {
+            "name": "ClaimFinalized",
+            "values": [
+                {
+                    "name": "vaultId",
+                    "type": "UINT256"
+                },
+                {
+                    "name": "finalizedBy",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "blockNum",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "payoutRef",
+                    "type": "BYTES"
+                }
+            ],
+            "type": "Event"
+        }
+    ]
+}
