@@ -52,8 +52,12 @@ export default function LegacyVaultReviewScreen() {
 
             setDraft(null);
             setSelectedVaultId(result.vaultId);
-            tools.toastSuccess('Legacy Vault created');
-            navigate(RouteTypes.LegacyVaultStatusScreen, { vaultId: result.vaultId });
+            tools.toastSuccess('Create transaction broadcasted. Waiting for confirmation...');
+            navigate(RouteTypes.LegacyVaultStatusScreen, {
+                vaultId: result.vaultId,
+                pendingAction: 'create',
+                pendingTxid: result.txid
+            });
         } catch (error) {
             console.error(error);
             tools.toastError('Failed to create legacy vault');

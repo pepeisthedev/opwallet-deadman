@@ -53,14 +53,13 @@ import {
     HistoryOutlined,
     LockOutlined,
     QrcodeOutlined,
+    SafetyCertificateOutlined,
     SendOutlined,
     SettingOutlined,
     SwapOutlined,
     WalletOutlined,
     WarningOutlined
 } from '@ant-design/icons';
-import { faSkull } from '@fortawesome/free-solid-svg-icons';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Address } from '@btc-vision/transaction';
 import { Tooltip } from 'antd';
 import ActionButton from '../../../components/ActionButton/index';
@@ -986,8 +985,8 @@ export default function WalletTabScreen() {
                             />
 
                             <ActionButton
-                                label="Deadman"
-                                icon={<FontAwesomeIcon icon={faSkull} style={{ fontSize: 16, color: '#60A5FA' }} />}
+                                label="Inheritance"
+                                icon={<SafetyCertificateOutlined style={{ fontSize: 18, color: '#60A5FA' }} />}
                                 onClick={() => navigate(RouteTypes.LegacyVaultHomeScreen)}
                             />
                         </div>

@@ -11,7 +11,6 @@ import {
     Revert,
     StoredU256,
     bigEndianAdd,
-    encodePointer,
     encodePointerUnknownLength
 } from '@btc-vision/btc-runtime/runtime';
 
@@ -454,15 +453,9 @@ export class LegacyVaultStateMachine extends OP_NET {
     }
 
     private vaultStorageKey(vaultId: u256): Uint8Array {
-        // encodePointer reserves the first 2 bytes for the pointer ID and expects 30 bytes of payload.
-        // For incremental vault IDs, keep the LOW 30 bytes (drop the top 2 bytes) to avoid collisions.
-        const full = vaultId.toUint8Array(true); // 32-byte BE
-        const subPointer = new Uint8Array(30);
-        for (let i = 0; i < 30; i++) {
-            subPointer[i] = full[i + 2];
-        }
-
-        return encodePointer(VAULT_RECORD_POINTER, subPointer, true, 'vaultStorageKey');
+        // Hash-derived pointer prevents slot overlap when a vault record spans multiple chunks.
+        // (Sequential numeric vaultIds + bigEndianAdd(chunk) can otherwise collide across vaults.)
+        return encodePointerUnknownLength(VAULT_RECORD_POINTER, vaultId.toUint8Array(true));
     }
 
     private ownerVaultIndexStorageKey(owner: Address): Uint8Array {

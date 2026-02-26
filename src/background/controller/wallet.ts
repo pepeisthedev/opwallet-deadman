@@ -189,6 +189,8 @@ const LEGACY_VAULT_BPS_TOTAL = 10000;
 const LEGACY_VAULT_BLOCK_SECONDS_ESTIMATE = 60;
 const LEGACY_VAULT_BLOCK_MS_ESTIMATE = LEGACY_VAULT_BLOCK_SECONDS_ESTIMATE * 1000;
 const LEGACY_VAULT_MAX_PAYOUT_REF_BYTES = 200;
+const LEGACY_VAULT_DEFAULT_FEE_RATE = 10;
+const LEGACY_VAULT_REPLACEMENT_RETRY_MAX_FEE_RATE = 100;
 
 const LEGACY_VAULT_UNIT_TO_SECONDS = {
     minutes: 60,
@@ -4349,11 +4351,30 @@ export class WalletController {
             mldsaSigner: ctx.walletSigner.mldsaKeypair,
             refundTo: ctx.account.address,
             maximumAllowedSatToSpend: 0n,
-            feeRate: 2,
+            // 2 sat/vB was frequently rejected by the OP_NET backend as insufficient.
+            feeRate: LEGACY_VAULT_DEFAULT_FEE_RATE,
             network: Web3API.network,
             priorityFee: 0n,
             linkMLDSAPublicKeyToAddress: true
         };
+    };
+
+    private legacyVaultIsReplacementFeeRejection = (message: string): boolean => {
+        const normalized = message.toLowerCase();
+        return normalized.includes('rejecting replacement') && normalized.includes('insufficient fee');
+    };
+
+    private legacyVaultBumpFeeRate = (currentFeeRate: number): number => {
+        const safeFeeRate =
+            Number.isFinite(currentFeeRate) && currentFeeRate > 0
+                ? Math.ceil(currentFeeRate)
+                : LEGACY_VAULT_DEFAULT_FEE_RATE;
+
+        // RBF relay rules require an absolute fee increase over the conflicting mempool tx.
+        // A meaningful bump avoids repeated "replacement rejected" loops.
+        const doubled = safeFeeRate * 2;
+        const plusTen = safeFeeRate + 10;
+        return Math.min(LEGACY_VAULT_REPLACEMENT_RETRY_MAX_FEE_RATE, Math.max(doubled, plusTen));
     };
 
     private legacyVaultSendSimulationWithPreflight = async (
@@ -4363,40 +4384,196 @@ export class WalletController {
         },
         params: TransactionParameters
     ): Promise<any> => {
-        // Sign first so we can validate raw tx hex locally before RPC broadcast.
-        const signedTx = await simulation.signTransaction(params);
-        let fundingTxId: string | undefined;
-        let interactionTxId = '';
+        const attemptSend = async (attemptParams: TransactionParameters, attempt: number): Promise<any> => {
+            // Sign first so we can validate raw tx hex locally before RPC broadcast.
+            const signedTx = await simulation.signTransaction(attemptParams);
+            let fundingTxId: string | undefined;
+            let interactionTxId = '';
+            let fundingTxInputs = -1;
+            let fundingTxOutputs = -1;
+            let fundingTxLooksPlaceholder = false;
+            let fundingBroadcastBypassed = false;
 
-        try {
-            if (signedTx.fundingTransactionRaw) {
-                fundingTxId = Transaction.fromHex(signedTx.fundingTransactionRaw).getId();
+            try {
+                if (signedTx.fundingTransactionRaw) {
+                    const fundingTx = Transaction.fromHex(signedTx.fundingTransactionRaw);
+                    fundingTxId = fundingTx.getId();
+                    fundingTxInputs = fundingTx.ins.length;
+                    fundingTxOutputs = fundingTx.outs.length;
+
+                    // Some opnet flows return a placeholder "funding tx" even when no separate funding tx
+                    // should be broadcast. The provider then rejects it as undecodable.
+                    if (fundingTxInputs === 0 || fundingTxOutputs === 0) {
+                        fundingTxLooksPlaceholder = true;
+                    }
+                }
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                const fundingHexLen =
+                    typeof signedTx.fundingTransactionRaw === 'string' ? signedTx.fundingTransactionRaw.length : 0;
+
+                if (fundingHexLen > 0 && fundingHexLen <= 20) {
+                    fundingTxLooksPlaceholder = true;
+                } else {
+                    throw new WalletControllerError(`Legacy Vault funding transaction is malformed before broadcast: ${message}`);
+                }
             }
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            throw new WalletControllerError(`Legacy Vault funding transaction is malformed before broadcast: ${message}`);
-        }
+
+            try {
+                interactionTxId = Transaction.fromHex(signedTx.interactionTransactionRaw).getId();
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                throw new WalletControllerError(`Legacy Vault interaction transaction is malformed before broadcast: ${message}`);
+            }
+
+            try {
+                const debugSuffix = (
+                    stage: 'funding' | 'interaction',
+                    message: string,
+                    extra?: Record<string, string | number>
+                ): string => {
+                    const feeRate =
+                        typeof attemptParams.feeRate === 'number' ? attemptParams.feeRate : LEGACY_VAULT_DEFAULT_FEE_RATE;
+                    const base = [
+                        `attempt=${attempt}`,
+                        `stage=${stage}`,
+                        `feeRate=${feeRate}`,
+                        `fundingHexLen=${typeof signedTx.fundingTransactionRaw === 'string' ? signedTx.fundingTransactionRaw.length : 0}`,
+                        `interactionHexLen=${typeof signedTx.interactionTransactionRaw === 'string' ? signedTx.interactionTransactionRaw.length : 0}`,
+                        `compiledScriptBytes=${typeof signedTx.compiledTargetScript === 'string' ? Math.floor(signedTx.compiledTargetScript.length / 2) : 0}`,
+                        `fundingTxId=${fundingTxId || 'none'}`,
+                        `fundingIns=${fundingTxInputs}`,
+                        `fundingOuts=${fundingTxOutputs}`,
+                        `fundingPlaceholder=${fundingTxLooksPlaceholder ? 1 : 0}`,
+                        `fundingBypass=${fundingBroadcastBypassed ? 1 : 0}`,
+                        `interactionTxId=${interactionTxId}`
+                    ];
+
+                    if (extra) {
+                        for (const [key, value] of Object.entries(extra)) {
+                            base.push(`${key}=${value}`);
+                        }
+                    }
+
+                    return `${message} [legacy-vault-debug ${base.join(' ')}]`;
+                };
+
+                if (signedTx.fundingTransactionRaw && !fundingTxLooksPlaceholder) {
+                    const fundingBroadcast = await Web3API.provider.sendRawTransaction(signedTx.fundingTransactionRaw, false);
+                    if (!fundingBroadcast) {
+                        throw new WalletControllerError(debugSuffix('funding', 'Error sending transaction: No result from funding broadcast'));
+                    }
+                    if (fundingBroadcast.error) {
+                        throw new WalletControllerError(
+                            debugSuffix('funding', `Error sending transaction: ${fundingBroadcast.error}`, {
+                                providerSuccess: fundingBroadcast.success ? 1 : 0
+                            })
+                        );
+                    }
+                    if (!fundingBroadcast.success) {
+                        throw new WalletControllerError(
+                            debugSuffix('funding', `Error sending transaction: ${fundingBroadcast.result || 'Unknown error'}`)
+                        );
+                    }
+                } else if (signedTx.fundingTransactionRaw && fundingTxLooksPlaceholder) {
+                    fundingBroadcastBypassed = true;
+                }
+
+                const interactionBroadcast = await Web3API.provider.sendRawTransaction(signedTx.interactionTransactionRaw, false);
+                if (!interactionBroadcast) {
+                    throw new WalletControllerError(
+                        debugSuffix('interaction', 'Error sending transaction: No result from interaction broadcast')
+                    );
+                }
+                if (interactionBroadcast.error) {
+                    throw new WalletControllerError(
+                        debugSuffix('interaction', `Error sending transaction: ${interactionBroadcast.error}`, {
+                            providerSuccess: interactionBroadcast.success ? 1 : 0,
+                            peers: interactionBroadcast.peers ?? 0
+                        })
+                    );
+                }
+                if (!interactionBroadcast.result) {
+                    throw new WalletControllerError(
+                        debugSuffix('interaction', 'Error sending transaction: No transaction ID returned')
+                    );
+                }
+                if (!interactionBroadcast.success) {
+                    throw new WalletControllerError(
+                        debugSuffix('interaction', `Error sending transaction: ${interactionBroadcast.result || 'Unknown error'}`, {
+                            peers: interactionBroadcast.peers ?? 0
+                        })
+                    );
+                }
+
+                try {
+                    const utxoTracking = signedTx.utxoTracking;
+                    const refundAddress = utxoTracking?.refundAddress || attemptParams.refundTo;
+                    const spent = utxoTracking?.regularUTXOs?.length ? utxoTracking.regularUTXOs : signedTx.fundingInputUtxos;
+                    Web3API.provider.utxoManager.spentUTXO(refundAddress, spent, signedTx.nextUTXOs);
+                } catch (utxoError) {
+                    console.warn('LegacyVault: failed to update UTXO tracking after broadcast', utxoError);
+                }
+
+                return {
+                    interactionAddress: signedTx.interactionAddress,
+                    transactionId: interactionBroadcast.result,
+                    peerAcknowledgements: interactionBroadcast.peers || 0,
+                    newUTXOs: signedTx.nextUTXOs,
+                    estimatedFees: signedTx.estimatedFees,
+                    challengeSolution: signedTx.challengeSolution,
+                    rawTransaction: signedTx.interactionTransactionRaw,
+                    fundingUTXOs: signedTx.fundingUTXOs,
+                    fundingInputUtxos: signedTx.fundingInputUtxos,
+                    compiledTargetScript: signedTx.compiledTargetScript
+                };
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                const compiledTargetScriptHex =
+                    typeof signedTx.compiledTargetScript === 'string' ? signedTx.compiledTargetScript : '';
+                const compiledTargetScriptBytes = compiledTargetScriptHex ? Math.floor(compiledTargetScriptHex.length / 2) : 0;
+                const fundingHexLen =
+                    typeof signedTx.fundingTransactionRaw === 'string' ? signedTx.fundingTransactionRaw.length : 0;
+                const interactionHexLen =
+                    typeof signedTx.interactionTransactionRaw === 'string' ? signedTx.interactionTransactionRaw.length : 0;
+                const feeRate =
+                    typeof attemptParams.feeRate === 'number' ? attemptParams.feeRate : LEGACY_VAULT_DEFAULT_FEE_RATE;
+                // Preserve errors already annotated with stage + debug details.
+                if (message.includes('[legacy-vault-debug')) {
+                    throw error;
+                }
+
+                throw new WalletControllerError(
+                    `${message} [legacy-vault-debug attempt=${attempt} feeRate=${feeRate} fundingHexLen=${fundingHexLen} interactionHexLen=${interactionHexLen} compiledScriptBytes=${compiledTargetScriptBytes} fundingTxId=${fundingTxId || 'none'} fundingIns=${fundingTxInputs} fundingOuts=${fundingTxOutputs} fundingPlaceholder=${fundingTxLooksPlaceholder ? 1 : 0} fundingBypass=${fundingBroadcastBypassed ? 1 : 0} interactionTxId=${interactionTxId}]`
+                );
+            }
+        };
 
         try {
-            interactionTxId = Transaction.fromHex(signedTx.interactionTransactionRaw).getId();
+            return await attemptSend(params, 1);
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            throw new WalletControllerError(`Legacy Vault interaction transaction is malformed before broadcast: ${message}`);
-        }
+            if (!this.legacyVaultIsReplacementFeeRejection(message)) {
+                throw error;
+            }
 
-        try {
-            return await simulation.sendPresignedTransaction(signedTx);
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            const compiledTargetScriptHex = typeof signedTx.compiledTargetScript === 'string' ? signedTx.compiledTargetScript : '';
-            const compiledTargetScriptBytes = compiledTargetScriptHex ? Math.floor(compiledTargetScriptHex.length / 2) : 0;
-            const fundingHexLen = typeof signedTx.fundingTransactionRaw === 'string' ? signedTx.fundingTransactionRaw.length : 0;
-            const interactionHexLen =
-                typeof signedTx.interactionTransactionRaw === 'string' ? signedTx.interactionTransactionRaw.length : 0;
+            const currentFeeRate = typeof params.feeRate === 'number' ? params.feeRate : LEGACY_VAULT_DEFAULT_FEE_RATE;
+            const bumpedFeeRate = this.legacyVaultBumpFeeRate(currentFeeRate);
 
-            throw new WalletControllerError(
-                `${message} [legacy-vault-debug fundingHexLen=${fundingHexLen} interactionHexLen=${interactionHexLen} compiledScriptBytes=${compiledTargetScriptBytes} fundingTxId=${fundingTxId || 'none'} interactionTxId=${interactionTxId}]`
+            if (bumpedFeeRate <= currentFeeRate) {
+                throw error;
+            }
+
+            console.warn(
+                `LegacyVault: replacement tx rejected at feeRate=${currentFeeRate}; retrying once with feeRate=${bumpedFeeRate}`
             );
+
+            const retryParams: TransactionParameters = {
+                ...params,
+                feeRate: bumpedFeeRate
+            };
+
+            return attemptSend(retryParams, 2);
         }
     };
 
@@ -4588,9 +4765,15 @@ export class WalletController {
                     heirsCount: vault.heirsCount
                 }));
 
-            // Keep locally cached vaults visible if the contract owner index is empty/misaligned.
+            // Keep only local-only (non-numeric) vaults visible alongside contract-backed vaults.
+            // Numeric IDs are contract IDs and can become stale after redeploying to a new contract address.
             const seen = new Set(contractSummaries.map((vault) => vault.vaultId));
-            const merged = [...contractSummaries, ...localVaults.filter((vault) => !seen.has(vault.vaultId))];
+            const merged = [
+                ...contractSummaries,
+                ...localVaults.filter(
+                    (vault) => this.parseLegacyVaultNumericId(vault.vaultId) === null && !seen.has(vault.vaultId)
+                )
+            ];
 
             return merged;
         } catch (error) {
@@ -4613,7 +4796,9 @@ export class WalletController {
         try {
             const currentBlock = await Web3API.provider.getBlockNumber().catch(() => undefined);
             const contractVault = await this.getLegacyVaultDetailsFromContract(ctx, numericVaultId, currentBlock);
-            return contractVault || (await legacyVaultService.getVault(vaultId));
+            // Numeric IDs belong to the active contract. If the contract says it does not exist,
+            // do not resurrect a stale cached record from a previous deployment.
+            return contractVault;
         } catch (error) {
             console.warn(`LegacyVault: failed to read vault ${vaultId} from contract, falling back to local cache`, error);
             return legacyVaultService.getVault(vaultId);
@@ -4826,7 +5011,9 @@ export class WalletController {
         }
 
         try {
-            let payoutRef = new Uint8Array();
+            // Backend tx decoder appears to be fragile with empty dynamic BYTES calldata.
+            // Use a small non-empty marker by default, even when no claimant string is provided.
+            let payoutRef = new Uint8Array(fromUtf8('claim'));
             const trimmedClaimant = claimant?.trim();
             if (trimmedClaimant) {
                 const encoded = new Uint8Array(fromUtf8(`claimant:${trimmedClaimant}`));

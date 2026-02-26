@@ -15,7 +15,8 @@ import {
     panelStyle,
     primaryButtonStyle,
     secondaryButtonStyle,
-    statusColor
+    statusColor,
+    withDisabledButtonStyle
 } from './common';
 
 export default function LegacyVaultHomeScreen() {
@@ -59,9 +60,20 @@ export default function LegacyVaultHomeScreen() {
                 return;
             }
 
-            tools.toastSuccess(
-                action === 'checkIn' ? 'Check-in recorded' : action === 'trigger' ? 'Vault triggered' : 'Claim completed'
-            );
+            if (result.txid) {
+                tools.toastSuccess(
+                    `${action === 'checkIn' ? 'Check-in' : action === 'trigger' ? 'Trigger' : 'Claim'} transaction broadcasted. Waiting for confirmation...`
+                );
+                setSelectedVaultId(vaultId);
+                navigate(RouteTypes.LegacyVaultStatusScreen, {
+                    vaultId,
+                    pendingAction: action,
+                    pendingTxid: result.txid
+                });
+                return;
+            }
+
+            tools.toastSuccess(action === 'checkIn' ? 'Check-in recorded' : action === 'trigger' ? 'Vault triggered' : 'Claim completed');
             await loadVaults();
         } catch (error) {
             console.error(error);
@@ -172,19 +184,19 @@ export default function LegacyVaultHomeScreen() {
                                             View
                                         </button>
                                         <button
-                                            style={secondaryButtonStyle}
+                                            style={withDisabledButtonStyle(secondaryButtonStyle, isBusy || vault.status === 'CLAIMED')}
                                             disabled={isBusy || vault.status === 'CLAIMED'}
                                             onClick={() => void runAction(vault.vaultId, 'checkIn')}>
                                             Check in
                                         </button>
                                         <button
-                                            style={secondaryButtonStyle}
+                                            style={withDisabledButtonStyle(secondaryButtonStyle, isBusy || vault.status !== 'OVERDUE')}
                                             disabled={isBusy || vault.status !== 'OVERDUE'}
                                             onClick={() => void runAction(vault.vaultId, 'trigger')}>
                                             Trigger
                                         </button>
                                         <button
-                                            style={secondaryButtonStyle}
+                                            style={withDisabledButtonStyle(secondaryButtonStyle, isBusy || vault.status !== 'CLAIMABLE')}
                                             disabled={isBusy || vault.status !== 'CLAIMABLE'}
                                             onClick={() => {
                                                 setSelectedVaultId(vault.vaultId);

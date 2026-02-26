@@ -2,6 +2,8 @@ import { CSSProperties } from 'react';
 
 import { LegacyVaultStatus } from '@/shared/types/LegacyVault';
 
+export type LegacyVaultPendingAction = 'create' | 'checkIn' | 'trigger' | 'claim';
+
 export const lvColors = {
     main: '#f37413',
     background: '#212121',
@@ -70,6 +72,44 @@ export const dangerButtonStyle: CSSProperties = {
     border: `1px solid ${lvColors.danger}55`,
     color: lvColors.danger
 };
+
+export function withDisabledButtonStyle(base: CSSProperties, disabled?: boolean): CSSProperties {
+    if (!disabled) {
+        return base;
+    }
+
+    return {
+        ...base,
+        opacity: 0.45,
+        cursor: 'not-allowed',
+        filter: 'saturate(0.6)'
+    };
+}
+
+export function legacyVaultPendingActionLabel(action: LegacyVaultPendingAction): string {
+    switch (action) {
+        case 'create':
+            return 'Create';
+        case 'checkIn':
+            return 'Check-in';
+        case 'trigger':
+            return 'Trigger';
+        case 'claim':
+            return 'Claim';
+        default:
+            return 'Action';
+    }
+}
+
+export function legacyVaultTxExplorerUrl(txid?: string): string | null {
+    const value = txid?.trim();
+    if (!value) {
+        return null;
+    }
+
+    // MVP default: OP_NET testnet explorer route.
+    return `https://opscan.org/transactions/${encodeURIComponent(value)}?network=op_testnet`;
+}
 
 export function statusColor(status: LegacyVaultStatus): string {
     switch (status) {

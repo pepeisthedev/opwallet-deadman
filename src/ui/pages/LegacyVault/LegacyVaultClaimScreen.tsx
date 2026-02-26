@@ -15,7 +15,8 @@ import {
     panelStyle,
     primaryButtonStyle,
     secondaryButtonStyle,
-    statusColor
+    statusColor,
+    withDisabledButtonStyle
 } from './common';
 
 interface ClaimLocationState {
@@ -74,8 +75,12 @@ export default function LegacyVaultClaimScreen() {
                 tools.toastError(result.error || 'Claim failed');
                 return;
             }
-            tools.toastSuccess('Claim completed');
-            navigate(RouteTypes.LegacyVaultStatusScreen, { vaultId: vault.vaultId });
+            tools.toastSuccess('Claim transaction broadcasted. Waiting for confirmation...');
+            navigate(RouteTypes.LegacyVaultStatusScreen, {
+                vaultId: vault.vaultId,
+                pendingAction: 'claim',
+                pendingTxid: result.txid
+            });
         } catch (error) {
             console.error(error);
             tools.toastError('Claim failed');
@@ -171,13 +176,13 @@ export default function LegacyVaultClaimScreen() {
 
                 <div style={{ display: 'flex', gap: '8px' }}>
                     <button
-                        style={primaryButtonStyle}
+                        style={withDisabledButtonStyle(primaryButtonStyle, Boolean(claimDisabledReason) || claiming)}
                         onClick={() => void handleClaim()}
                         disabled={Boolean(claimDisabledReason) || claiming}>
                         {claiming ? 'Claiming...' : 'Execute Claim'}
                     </button>
                     <button
-                        style={secondaryButtonStyle}
+                        style={withDisabledButtonStyle(secondaryButtonStyle, claiming)}
                         onClick={() => navigate(RouteTypes.LegacyVaultStatusScreen, { vaultId: vault.vaultId })}
                         disabled={claiming}>
                         Back to Status

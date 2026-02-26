@@ -12,16 +12,28 @@ import {
     formatPercentFromBps,
     formatSats,
     formatTimestamp,
+    legacyVaultPendingActionLabel,
+    legacyVaultTxExplorerUrl,
     lvColors,
     pageContainerStyle,
     panelStyle,
     primaryButtonStyle,
     secondaryButtonStyle,
-    statusColor
+    statusColor,
+    type LegacyVaultPendingAction,
+    withDisabledButtonStyle
 } from './common';
 
 interface StatusLocationState {
     vaultId?: string;
+    pendingAction?: LegacyVaultPendingAction;
+    pendingTxid?: string;
+}
+
+interface LegacyVaultPendingNotice {
+    action: LegacyVaultPendingAction;
+    txid?: string;
+    atTs: number;
 }
 
 export default function LegacyVaultStatusScreen() {
@@ -37,6 +49,15 @@ export default function LegacyVaultStatusScreen() {
     const [vault, setVault] = useState<LegacyVaultDetails | null>(null);
     const [loading, setLoading] = useState(true);
     const [actionBusy, setActionBusy] = useState<string | null>(null);
+    const [pendingNotice, setPendingNotice] = useState<LegacyVaultPendingNotice | null>(() =>
+        routeState?.pendingAction
+            ? {
+                  action: routeState.pendingAction,
+                  txid: routeState.pendingTxid,
+                  atTs: Date.now()
+              }
+            : null
+    );
 
     const loadVault = useCallback(async () => {
         if (!vaultId) {
@@ -63,6 +84,18 @@ export default function LegacyVaultStatusScreen() {
         void loadVault();
     }, [loadVault]);
 
+    useEffect(() => {
+        if (!routeState?.pendingAction) {
+            return;
+        }
+
+        setPendingNotice({
+            action: routeState.pendingAction,
+            txid: routeState.pendingTxid,
+            atTs: Date.now()
+        });
+    }, [routeState?.pendingAction, routeState?.pendingTxid]);
+
     const runAction = async (action: 'checkIn' | 'trigger') => {
         if (!vault) return;
         setActionBusy(action);
@@ -74,7 +107,18 @@ export default function LegacyVaultStatusScreen() {
                 tools.toastError(result.error || 'Action failed');
                 return;
             }
-            tools.toastSuccess(action === 'checkIn' ? 'Check-in recorded' : 'Vault triggered');
+            if (result.txid) {
+                setPendingNotice({
+                    action,
+                    txid: result.txid,
+                    atTs: Date.now()
+                });
+                tools.toastSuccess(
+                    `${action === 'checkIn' ? 'Check-in' : 'Trigger'} transaction broadcasted. Waiting for confirmation...`
+                );
+            } else {
+                tools.toastSuccess(action === 'checkIn' ? 'Check-in recorded' : 'Vault triggered');
+            }
             await loadVault();
         } catch (error) {
             console.error(error);
@@ -87,6 +131,67 @@ export default function LegacyVaultStatusScreen() {
     const canCheckIn = useMemo(() => vault && vault.status !== 'CLAIMED', [vault]);
     const canTrigger = useMemo(() => vault?.status === 'OVERDUE', [vault]);
     const canClaim = useMemo(() => vault?.status === 'CLAIMABLE', [vault]);
+    const pendingTxUrl = useMemo(() => legacyVaultTxExplorerUrl(pendingNotice?.txid), [pendingNotice?.txid]);
+
+    const renderTxRef = (txid?: string) => {
+        if (!txid) {
+            return '—';
+        }
+
+        const txUrl = legacyVaultTxExplorerUrl(txid);
+        if (!txUrl) {
+            return txid;
+        }
+
+        return (
+            <a
+                href={txUrl}
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: lvColors.info, textDecoration: 'none', wordBreak: 'break-all' }}>
+                {txid}
+            </a>
+        );
+    };
+
+    const pendingNoticePanel = pendingNotice ? (
+        <div
+            style={{
+                ...panelStyle,
+                marginBottom: '12px',
+                border: `1px solid ${lvColors.info}44`,
+                background: 'rgba(96, 165, 250, 0.08)'
+            }}>
+            <div style={{ color: lvColors.info, fontWeight: 700, fontSize: '12px', marginBottom: '6px' }}>
+                {legacyVaultPendingActionLabel(pendingNotice.action)} Transaction Broadcasted
+            </div>
+            <div style={{ color: lvColors.textMuted, fontSize: '11px', lineHeight: 1.4 }}>
+                The transaction was sent to the network. Contract state in the wallet may take a moment to update after
+                confirmation/indexing.
+            </div>
+            {pendingNotice.txid && (
+                <div style={{ marginTop: '8px', fontSize: '10px', color: lvColors.text }}>
+                    <div style={{ color: lvColors.textMuted, marginBottom: '4px' }}>Tx ID</div>
+                    <div style={{ wordBreak: 'break-all' }}>{pendingNotice.txid}</div>
+                    {pendingTxUrl && (
+                        <a
+                            href={pendingTxUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{
+                                display: 'inline-block',
+                                marginTop: '6px',
+                                color: lvColors.info,
+                                textDecoration: 'none',
+                                fontWeight: 600
+                            }}>
+                            View on OP_SCAN
+                        </a>
+                    )}
+                </div>
+            )}
+        </div>
+    ) : null;
 
     if (loading) {
         return (
@@ -104,6 +209,7 @@ export default function LegacyVaultStatusScreen() {
             <Layout>
                 <Header onBack={() => window.history.go(-1)} title="Legacy Vault Status" />
                 <div style={pageContainerStyle}>
+                    {pendingNoticePanel}
                     <div style={{ ...panelStyle, marginBottom: '12px' }}>
                         <div style={{ color: lvColors.text, fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>
                             Vault Not Found
@@ -124,6 +230,7 @@ export default function LegacyVaultStatusScreen() {
         <Layout>
             <Header onBack={() => window.history.go(-1)} title="Legacy Vault Status" />
             <div style={pageContainerStyle}>
+                {pendingNoticePanel}
                 <div style={{ ...panelStyle, marginBottom: '12px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '10px' }}>
                         <div>
@@ -192,21 +299,13 @@ export default function LegacyVaultStatusScreen() {
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 10px', fontSize: '10px' }}>
                         <div style={{ color: lvColors.textMuted }}>Create Tx</div>
-                        <div style={{ color: lvColors.text, textAlign: 'right', wordBreak: 'break-all' }}>
-                            {vault.txRefs.createdTxId || '—'}
-                        </div>
+                        <div style={{ color: lvColors.text, textAlign: 'right' }}>{renderTxRef(vault.txRefs.createdTxId)}</div>
                         <div style={{ color: lvColors.textMuted }}>Last Check-in Tx</div>
-                        <div style={{ color: lvColors.text, textAlign: 'right', wordBreak: 'break-all' }}>
-                            {vault.txRefs.lastCheckInTxId || '—'}
-                        </div>
+                        <div style={{ color: lvColors.text, textAlign: 'right' }}>{renderTxRef(vault.txRefs.lastCheckInTxId)}</div>
                         <div style={{ color: lvColors.textMuted }}>Trigger Tx</div>
-                        <div style={{ color: lvColors.text, textAlign: 'right', wordBreak: 'break-all' }}>
-                            {vault.txRefs.triggerTxId || '—'}
-                        </div>
+                        <div style={{ color: lvColors.text, textAlign: 'right' }}>{renderTxRef(vault.txRefs.triggerTxId)}</div>
                         <div style={{ color: lvColors.textMuted }}>Claim Tx</div>
-                        <div style={{ color: lvColors.text, textAlign: 'right', wordBreak: 'break-all' }}>
-                            {vault.txRefs.claimTxId || '—'}
-                        </div>
+                        <div style={{ color: lvColors.text, textAlign: 'right' }}>{renderTxRef(vault.txRefs.claimTxId)}</div>
                     </div>
                 </div>
 
@@ -215,19 +314,19 @@ export default function LegacyVaultStatusScreen() {
                         Refresh
                     </button>
                     <button
-                        style={secondaryButtonStyle}
+                        style={withDisabledButtonStyle(secondaryButtonStyle, !canCheckIn || actionBusy !== null)}
                         disabled={!canCheckIn || actionBusy !== null}
                         onClick={() => void runAction('checkIn')}>
                         {actionBusy === 'checkIn' ? 'Checking in...' : 'Check in'}
                     </button>
                     <button
-                        style={secondaryButtonStyle}
+                        style={withDisabledButtonStyle(secondaryButtonStyle, !canTrigger || actionBusy !== null)}
                         disabled={!canTrigger || actionBusy !== null}
                         onClick={() => void runAction('trigger')}>
                         {actionBusy === 'trigger' ? 'Triggering...' : 'Trigger'}
                     </button>
                     <button
-                        style={primaryButtonStyle}
+                        style={withDisabledButtonStyle(primaryButtonStyle, !canClaim)}
                         disabled={!canClaim}
                         onClick={() => navigate(RouteTypes.LegacyVaultClaimScreen, { vaultId: vault.vaultId })}>
                         Claim

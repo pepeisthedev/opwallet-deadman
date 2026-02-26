@@ -134,9 +134,9 @@ const SettingList: Setting[] = [
         right: true
     },
     {
-        label: 'Legacy Vault',
+        label: 'Inheritance Wallet',
         value: '',
-        desc: 'Inheritance & deadman vaults',
+        desc: 'Inheritance vaults',
         icon: <LockOutlined />,
         action: 'legacy-vault',
         route: '/legacy-vault',

@@ -177,22 +177,22 @@ export function OPNetList() {
         try {
             const result = await wallet.legacyVault_checkIn(quickDeadmanVault.vaultId);
             if (!result.ok) {
-                tools.toastError(result.error || 'Deadman check-in failed');
+                tools.toastError(result.error || 'Inheritance check-in failed');
                 return;
             }
 
-            tools.toastSuccess('Deadman check-in recorded');
+            tools.toastSuccess('Inheritance check-in recorded');
             await loadDeadmanVaults();
         } catch (error) {
-            console.error('Deadman check-in failed:', error);
-            tools.toastError('Deadman check-in failed');
+            console.error('Inheritance check-in failed:', error);
+            tools.toastError('Inheritance check-in failed');
         } finally {
             setIsDeadmanCheckingIn(false);
         }
     }, [isDeadmanCheckingIn, loadDeadmanVaults, quickDeadmanVault, tools, wallet]);
 
     const quickDeadmanCountdownText = useMemo(() => {
-        if (!quickDeadmanVault) return 'No Deadman vault found';
+        if (!quickDeadmanVault) return 'No Inheritance vault found';
 
         if (quickDeadmanVault.status === 'CLAIMED') {
             return 'Vault claimed';
@@ -698,7 +698,7 @@ export function OPNetList() {
                                         fontWeight: 600,
                                         whiteSpace: 'nowrap'
                                     }}>
-                                    Deadman
+                                    Inheritance
                                 </span>
                                 <span
                                     style={{
