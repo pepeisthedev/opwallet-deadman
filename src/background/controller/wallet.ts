@@ -4735,7 +4735,7 @@ export class WalletController {
                 ? this.estimateLegacyVaultTimestampFromBlock(props.claimedAtBlock, currentBlock, nowTs, cached?.claimedAtTs)
                 : undefined;
 
-        return {
+        const details: LegacyVaultDetails = {
             vaultId,
             label: cached?.label || `Vault #${vaultId}`,
             mode: 'opnet-managed',
@@ -4756,6 +4756,11 @@ export class WalletController {
                 cached?.notes ||
                 'OP_NET contract-backed vault. Metadata shown on this device may be partial if the vault was created elsewhere.'
         };
+
+        // Ensure heir devices (that did not create the vault) still get a local metadata mirror.
+        // This allows tx refs (trigger/claim txids) to persist after refresh/reopen.
+        await legacyVaultService.ensureContractVaultMirror(details);
+        return details;
     };
 
     private getLegacyVaultDetailsFromContract = async (
@@ -4923,6 +4928,28 @@ export class WalletController {
         return discovered;
     };
 
+    /**
+     * Ensure a local mirror exists before writing tx refs for contract-backed actions.
+     * This is required on devices/profiles that did not create the vault originally.
+     */
+    private legacyVaultEnsureTxRefsMirror = async (
+        ctx: LegacyVaultContractContext,
+        numericVaultId: bigint
+    ): Promise<void> => {
+        try {
+            const currentBlock = await Web3API.provider.getBlockNumber().catch(() => undefined);
+            const details = await this.getLegacyVaultDetailsFromContract(ctx, numericVaultId, currentBlock);
+            if (details) {
+                await legacyVaultService.ensureContractVaultMirror(details);
+            }
+        } catch (error) {
+            console.warn(
+                `LegacyVault: failed to ensure local mirror for tx refs (vaultId=${numericVaultId.toString()})`,
+                error
+            );
+        }
+    };
+
     public legacyVault_listVaults = async (): Promise<LegacyVaultSummary[]> => {
         const localVaults = await legacyVaultService.listVaults();
         const ctx = await this.getLegacyVaultContractContext();
@@ -4937,13 +4964,23 @@ export class WalletController {
             ]);
 
             const vaultIds = [...idsResult.properties.vaultIds].reverse();
-            const details = await Promise.all(
+            const detailsResults = await Promise.allSettled(
                 vaultIds.map((vaultIdBigInt) => this.getLegacyVaultDetailsFromContract(ctx, vaultIdBigInt, currentBlock))
             );
+            const contractSummaries: LegacyVaultSummary[] = [];
+            detailsResults.forEach((result, index) => {
+                if (result.status === 'fulfilled') {
+                    if (result.value) {
+                        contractSummaries.push(this.legacyVaultToSummary(result.value));
+                    }
+                    return;
+                }
 
-            const contractSummaries = details
-                .filter((vault): vault is LegacyVaultDetails => !!vault)
-                .map((vault) => this.legacyVaultToSummary(vault));
+                console.warn(
+                    `LegacyVault: failed to load contract vault ${vaultIds[index]?.toString() || '(unknown)'}, skipping`,
+                    result.reason
+                );
+            });
 
             // Keep only local-only (non-numeric) vaults visible alongside contract-backed vaults.
             // Numeric IDs are contract IDs and can become stale after redeploying to a new contract address.
@@ -5145,6 +5182,7 @@ export class WalletController {
                 this.buildLegacyVaultTxParams(ctx, `Legacy Vault: check-in ${vaultId}`)
             );
 
+            await this.legacyVaultEnsureTxRefsMirror(ctx, numericVaultId);
             await legacyVaultService.updateVaultTxRefs(
                 vaultId,
                 {
@@ -5194,6 +5232,7 @@ export class WalletController {
                 this.buildLegacyVaultTxParams(ctx, `Legacy Vault: trigger ${vaultId}`)
             );
 
+            await this.legacyVaultEnsureTxRefsMirror(ctx, numericVaultId);
             await legacyVaultService.updateVaultTxRefs(
                 vaultId,
                 {
@@ -5254,6 +5293,7 @@ export class WalletController {
                 this.buildLegacyVaultTxParams(ctx, `Legacy Vault: finalize claim ${vaultId}`)
             );
 
+            await this.legacyVaultEnsureTxRefsMirror(ctx, numericVaultId);
             await legacyVaultService.updateVaultTxRefs(
                 vaultId,
                 {

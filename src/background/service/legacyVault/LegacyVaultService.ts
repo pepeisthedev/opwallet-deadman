@@ -354,6 +354,47 @@ class LegacyVaultService {
     }
 
     /**
+     * Ensure a local metadata mirror exists for a contract-backed vault discovered on-chain.
+     * This is important on heir wallets where the vault was created from another device/profile.
+     */
+    public async ensureContractVaultMirror(details: LegacyVaultDetails): Promise<void> {
+        await this.ensureLoaded();
+
+        if (this.store?.vaults[details.vaultId]) {
+            return;
+        }
+
+        const nowTs = this.now();
+        const record: LegacyVaultRecord = {
+            vaultId: details.vaultId,
+            label: details.label || `Vault #${details.vaultId}`,
+            mode: 'opnet-managed',
+            amountSats: details.amountSats || 0,
+            heirs: (details.heirs || []).map((heir) => ({
+                label: heir.label?.trim() || '',
+                address: heir.address,
+                shareBps: Math.trunc(heir.shareBps)
+            })),
+            intervalSec: details.intervalSec || 0,
+            graceSec: details.graceSec || 0,
+            createdAtTs: details.createdAtTs || nowTs,
+            lastCheckInTs: details.lastCheckInTs || nowTs,
+            triggeredAtTs: details.triggeredAtTs,
+            claimedAtTs: details.claimedAtTs,
+            ownerAddress: details.ownerAddress,
+            txRefs: { ...(details.txRefs || {}) },
+            notes:
+                details.notes ||
+                'OP_NET contract-backed vault (local metadata mirror for UI labels/amount).',
+            updatedAtTs: nowTs
+        };
+
+        this.store!.vaults[details.vaultId] = record;
+        this.store!.order = [details.vaultId, ...this.store!.order.filter((id) => id !== details.vaultId)];
+        await this.persist();
+    }
+
+    /**
      * Update locally cached tx references for a contract-backed vault.
      * No-op if the vault metadata is not cached on this device.
      */

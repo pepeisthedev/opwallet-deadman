@@ -262,10 +262,31 @@ export default function LegacyVaultStatusScreen() {
 
         return vault.status === 'ACTIVE' && vault.nextDeadlineTs > 0 && Date.now() >= vault.nextDeadlineTs;
     }, [vault]);
-    const canClaim = useMemo(() => vault?.status === 'CLAIMABLE', [vault]);
+    const hasPendingClaim = useMemo(() => {
+        if (!vault) {
+            return false;
+        }
+        if (pendingNotice?.action === 'claim') {
+            return true;
+        }
+        return vault.status !== 'CLAIMED' && Boolean(vault.txRefs.claimTxId);
+    }, [pendingNotice?.action, vault]);
+    const canClaim = useMemo(() => vault?.status === 'CLAIMABLE' && !hasPendingClaim, [hasPendingClaim, vault]);
     const showCheckIn = viewerIsOwner;
     const showHeirActions = viewerIsHeir;
     const pendingTxUrl = useMemo(() => legacyVaultTxExplorerUrl(pendingNotice?.txid), [pendingNotice?.txid]);
+    const txRefs = useMemo(() => {
+        const fallbackTxid = pendingNotice?.txid?.trim() || undefined;
+        const fallbackAction = pendingNotice?.action;
+        const source = vault?.txRefs || {};
+
+        return {
+            createdTxId: source.createdTxId || (fallbackAction === 'create' ? fallbackTxid : undefined),
+            lastCheckInTxId: source.lastCheckInTxId || (fallbackAction === 'checkIn' ? fallbackTxid : undefined),
+            triggerTxId: source.triggerTxId || (fallbackAction === 'trigger' ? fallbackTxid : undefined),
+            claimTxId: source.claimTxId || (fallbackAction === 'claim' ? fallbackTxid : undefined)
+        };
+    }, [pendingNotice?.action, pendingNotice?.txid, vault?.txRefs]);
 
     const renderTxRef = (txid?: string) => {
         if (!txid) {
@@ -435,13 +456,13 @@ export default function LegacyVaultStatusScreen() {
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 10px', fontSize: '10px' }}>
                         <div style={{ color: lvColors.textMuted }}>Create Tx</div>
-                        <div style={{ color: lvColors.text, textAlign: 'right' }}>{renderTxRef(vault.txRefs.createdTxId)}</div>
+                        <div style={{ color: lvColors.text, textAlign: 'right' }}>{renderTxRef(txRefs.createdTxId)}</div>
                         <div style={{ color: lvColors.textMuted }}>Last Check-in Tx</div>
-                        <div style={{ color: lvColors.text, textAlign: 'right' }}>{renderTxRef(vault.txRefs.lastCheckInTxId)}</div>
+                        <div style={{ color: lvColors.text, textAlign: 'right' }}>{renderTxRef(txRefs.lastCheckInTxId)}</div>
                         <div style={{ color: lvColors.textMuted }}>Trigger Tx</div>
-                        <div style={{ color: lvColors.text, textAlign: 'right' }}>{renderTxRef(vault.txRefs.triggerTxId)}</div>
+                        <div style={{ color: lvColors.text, textAlign: 'right' }}>{renderTxRef(txRefs.triggerTxId)}</div>
                         <div style={{ color: lvColors.textMuted }}>Claim Tx</div>
-                        <div style={{ color: lvColors.text, textAlign: 'right' }}>{renderTxRef(vault.txRefs.claimTxId)}</div>
+                        <div style={{ color: lvColors.text, textAlign: 'right' }}>{renderTxRef(txRefs.claimTxId)}</div>
                     </div>
                 </div>
 
