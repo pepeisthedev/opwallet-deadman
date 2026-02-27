@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Rock Paper Scissors | OP_NET</title>
+        <meta
+            name="description"
+            content="Rock Paper Scissors on OP_NET: create a game, let another wallet join, execute, and reveal the winner." />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Manrope:wght@400;500;700&display=swap"
+            rel="stylesheet" />
+        <link rel="stylesheet" href="./styles.css" />
+    </head>
+    <body>
+        <div class="bg-orb bg-orb--one"></div>
+        <div class="bg-orb bg-orb--two"></div>
+
+        <header class="page-header">
+            <div class="badge">OP_NET Project</div>
+            <h1>Rock Paper Scissors</h1>
+            <p>
+                A simple two-player wallet game on OP_NET: create a game, lock in a move, let another wallet join, then
+                execute and reveal the winner.
+            </p>
+            <div class="cta-row">
+                <a class="btn btn-primary" href="#demo">Watch Demo</a>
+                <a class="btn btn-secondary" href="#flow">View Flow</a>
+            </div>
+        </header>
+
+        <main class="content">
+            <section class="panel panel-video" id="demo">
+                <h2>Demo Rock Paper Scissors</h2>
+                <div class="video-shell">
+                    <video controls preload="metadata" poster="./rockcover.png">
+                        <source src="https://pub-59fac2662d16414c8202fc478b0c90b7.r2.dev/rockpapersc.mp4" type="video/mp4" />
+                        Your browser does not support HTML5 video.
+                    </video>
+                </div>
+            </section>
+
+            <section class="panel" id="about">
+                <h2>Project Overview</h2>
+                <p>
+                    One wallet creates a game and locks in rock, paper, or scissors. A second wallet can join any open
+                    game and submit its move. Before execution, the other player should not see your move in the wallet
+                    UI. Once executed, both moves are revealed and the winner is shown.
+                </p>
+            </section>
+
+            <section class="panel" id="features">
+                <h2>Core Functionality</h2>
+                <div class="feature-grid">
+                    <article class="feature-card">
+                        <h3>Create Game</h3>
+                        <p>Start a new game and lock your move immediately when the transaction is created.</p>
+                    </article>
+                    <article class="feature-card">
+                        <h3>Join Open Game</h3>
+                        <p>Any other wallet can browse open games and join one with its own move.</p>
+                    </article>
+                    <article class="feature-card">
+                        <h3>Hidden Until Execute</h3>
+                        <p>The wallet keeps the opponent move hidden in the UI until the game is executed.</p>
+                    </article>
+                    <article class="feature-card">
+                        <h3>Winner Reveal</h3>
+                        <p>After execution, the wallet shows both moves and the final result clearly.</p>
+                    </article>
+                </div>
+            </section>
+
+            <section class="panel" id="flow">
+                <h2>Flow Summary</h2>
+                <ol class="flow-list">
+                    <li>Player 1 creates a new game and picks rock, paper, or scissors.</li>
+                    <li>Player 2 finds that open game and joins it with a move from another wallet.</li>
+                    <li>Neither side sees the other move in the wallet UI before execution.</li>
+                    <li>The game is executed and the wallet reveals both moves and the winner.</li>
+                </ol>
+            </section>
+
+            <section class="panel" id="testing">
+                <h2>Test the Extension</h2>
+                <ol class="flow-list">
+                    <li>Clone the wallet repository to your machine.</li>
+                    <li>Run <code>npm install</code> and build it, for example with <code>npm run build:chrome</code>.</li>
+                    <li>Open your browser extension page and enable Developer mode.</li>
+                    <li>Choose Load unpacked and import the built extension folder from <code>dist/</code>.</li>
+                    <li>Open the wallet, go to Rock Paper Scissors, and test it with two browser profiles.</li>
+                </ol>
+            </section>
+        </main>
+    </body>
+</html>
