@@ -5,6 +5,7 @@
   "scripts": {
     "postinstall": "node scripts/fix-noble-hashes-exports.cjs",
     "build:wasm": "asc src/index.ts --config asconfig.json --target release --uncheckedBehavior never",
+    "build:wasm:rps": "asc src/index.rps.ts --config asconfig.rps.json --target release --uncheckedBehavior never",
     "clean": "rm -rf build"
   },
   "dependencies": {

@@ -45,6 +45,7 @@ import LegacyVaultCreateScreen from './LegacyVault/LegacyVaultCreateScreen';
 import LegacyVaultHomeScreen from './LegacyVault/LegacyVaultHomeScreen';
 import LegacyVaultReviewScreen from './LegacyVault/LegacyVaultReviewScreen';
 import LegacyVaultStatusScreen from './LegacyVault/LegacyVaultStatusScreen';
+import RockPaperScissorsHomeScreen from './RockPaperScissors/RockPaperScissorsHomeScreen';
 import DeployContract from './OpNet/DeployContract';
 import Mint from './OpNet/Mint';
 import OpNetTokenScreen from './OpNet/OpNetTokenScreen';
@@ -319,6 +320,10 @@ export const routes: Routes = {
     [RouteTypes.LegacyVaultClaimScreen]: {
         path: routePaths[RouteTypes.LegacyVaultClaimScreen],
         element: <LegacyVaultClaimScreen />
+    },
+    [RouteTypes.RockPaperScissorsHomeScreen]: {
+        path: routePaths[RouteTypes.RockPaperScissorsHomeScreen],
+        element: <RockPaperScissorsHomeScreen />
     }
 };
 

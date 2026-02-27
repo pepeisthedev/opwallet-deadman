@@ -42,6 +42,7 @@ import {
     LegacyVaultDraftResult,
     LegacyVaultSummary
 } from '@/shared/types/LegacyVault';
+import { RpsActionResult, RpsChoice, RpsGameDetails, RpsGameSummary } from '@/shared/types/RockPaperScissors';
 import { Psbt } from '@btc-vision/bitcoin';
 import { AddressTypes, InteractionParametersWithoutSigner } from '@btc-vision/transaction';
 import { createContext, ReactNode, useContext } from 'react';
@@ -389,6 +390,14 @@ export interface WalletController {
     legacyVault_trigger(vaultId: string): Promise<LegacyVaultActionResult>;
     legacyVault_claim(vaultId: string, claimant?: string): Promise<LegacyVaultActionResult>;
     legacyVault_refresh(vaultId: string): Promise<LegacyVaultDetails | null>;
+
+    // Rock Paper Scissors contract
+    rps_listGames(): Promise<RpsGameSummary[]>;
+    rps_getGame(gameId: string): Promise<RpsGameDetails | null>;
+    rps_getSignerAddress(): Promise<string | null>;
+    rps_createGame(choice: RpsChoice): Promise<RpsActionResult>;
+    rps_joinGame(gameId: string, choice: RpsChoice): Promise<RpsActionResult>;
+    rps_resolveGame(gameId: string): Promise<RpsActionResult>;
 
     // Duplication detection and resolution
     checkForDuplicates(): Promise<DuplicationDetectionResult>;

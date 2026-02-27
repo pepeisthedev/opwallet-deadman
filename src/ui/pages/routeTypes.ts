@@ -60,7 +60,8 @@ export enum RouteTypes {
     LegacyVaultCreateScreen = 'LegacyVaultCreateScreen',
     LegacyVaultReviewScreen = 'LegacyVaultReviewScreen',
     LegacyVaultStatusScreen = 'LegacyVaultStatusScreen',
-    LegacyVaultClaimScreen = 'LegacyVaultClaimScreen'
+    LegacyVaultClaimScreen = 'LegacyVaultClaimScreen',
+    RockPaperScissorsHomeScreen = 'RockPaperScissorsHomeScreen'
 }
 
 export const routePaths: Record<RouteTypes, string> = {
@@ -122,7 +123,8 @@ export const routePaths: Record<RouteTypes, string> = {
     [RouteTypes.LegacyVaultCreateScreen]: '/legacy-vault/create',
     [RouteTypes.LegacyVaultReviewScreen]: '/legacy-vault/review',
     [RouteTypes.LegacyVaultStatusScreen]: '/legacy-vault/status',
-    [RouteTypes.LegacyVaultClaimScreen]: '/legacy-vault/claim'
+    [RouteTypes.LegacyVaultClaimScreen]: '/legacy-vault/claim',
+    [RouteTypes.RockPaperScissorsHomeScreen]: '/rock-paper-scissors'
 };
 
 export type UseNavigate<T extends RouteTypes> = (routKey: T, state?: unknown) => void;

@@ -1,0 +1,219 @@
+{
+    "functions": [
+        {
+            "name": "createGame",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "choice",
+                    "type": "UINT8"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "gameId",
+                    "type": "UINT256"
+                }
+            ]
+        },
+        {
+            "name": "joinGame",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "gameId",
+                    "type": "UINT256"
+                },
+                {
+                    "name": "choice",
+                    "type": "UINT8"
+                }
+            ],
+            "outputs": []
+        },
+        {
+            "name": "resolveGame",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "gameId",
+                    "type": "UINT256"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "winner",
+                    "type": "UINT8"
+                }
+            ]
+        },
+        {
+            "name": "getGame",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "gameId",
+                    "type": "UINT256"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "exists",
+                    "type": "BOOL"
+                },
+                {
+                    "name": "player1",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "player2",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "choice1",
+                    "type": "UINT8"
+                },
+                {
+                    "name": "choice2",
+                    "type": "UINT8"
+                },
+                {
+                    "name": "status",
+                    "type": "UINT8"
+                },
+                {
+                    "name": "winner",
+                    "type": "UINT8"
+                },
+                {
+                    "name": "createdAtBlock",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "joinedAtBlock",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "resolvedAtBlock",
+                    "type": "UINT64"
+                }
+            ]
+        },
+        {
+            "name": "getGameIdsByPlayer",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "player",
+                    "type": "ADDRESS"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "gameIds",
+                    "type": "ARRAY_OF_UINT256"
+                }
+            ]
+        },
+        {
+            "name": "getOpenGameIds",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "gameIds",
+                    "type": "ARRAY_OF_UINT256"
+                }
+            ]
+        },
+        {
+            "name": "getLatestGameId",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "latestGameId",
+                    "type": "UINT256"
+                }
+            ]
+        }
+    ],
+    "events": [
+        {
+            "name": "GameCreated",
+            "values": [
+                {
+                    "name": "gameId",
+                    "type": "UINT256"
+                },
+                {
+                    "name": "creator",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "choice",
+                    "type": "UINT8"
+                },
+                {
+                    "name": "blockNum",
+                    "type": "UINT64"
+                }
+            ],
+            "type": "Event"
+        },
+        {
+            "name": "GameJoined",
+            "values": [
+                {
+                    "name": "gameId",
+                    "type": "UINT256"
+                },
+                {
+                    "name": "joiner",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "choice",
+                    "type": "UINT8"
+                },
+                {
+                    "name": "blockNum",
+                    "type": "UINT64"
+                }
+            ],
+            "type": "Event"
+        },
+        {
+            "name": "GameResolved",
+            "values": [
+                {
+                    "name": "gameId",
+                    "type": "UINT256"
+                },
+                {
+                    "name": "winner",
+                    "type": "UINT8"
+                },
+                {
+                    "name": "blockNum",
+                    "type": "UINT64"
+                }
+            ],
+            "type": "Event"
+        }
+    ]
+}

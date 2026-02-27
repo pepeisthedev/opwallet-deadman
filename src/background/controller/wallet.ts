@@ -2,11 +2,17 @@ import { BitcoinUtils, BroadcastedTransaction, getContract, UTXOs, TransactionPa
 
 import { BTC_NAME_RESOLVER_ABI } from '@/shared/web3/abi/BTC_NAME_RESOLVER_ABI';
 import { LEGACY_VAULT_STATE_MACHINE_ABI } from '@/shared/web3/abi/LEGACY_VAULT_STATE_MACHINE_ABI';
+import { ROCK_PAPER_SCISSORS_ABI } from '@/shared/web3/abi/ROCK_PAPER_SCISSORS_ABI';
 import { IBtcNameResolverContract } from '@/shared/web3/interfaces/IBtcNameResolverContract';
 import {
     ILegacyVaultStateMachineContract,
     LegacyVaultStatusCode
 } from '@/shared/web3/interfaces/ILegacyVaultStateMachineContract';
+import {
+    IRockPaperScissorsContract,
+    RpsStatusCode,
+    RpsWinnerCode
+} from '@/shared/web3/interfaces/IRockPaperScissorsContract';
 
 import addressRotationService from '@/background/service/addressRotation';
 import contactBookService from '@/background/service/contactBook';
@@ -14,6 +20,7 @@ import duplicationBackupService from '@/background/service/duplicationBackup';
 import duplicationDetectionService from '@/background/service/duplicationDetection';
 import { getLegacyVaultStateMachineAddress } from '@/background/service/legacyVault/legacyVaultContractConfig';
 import legacyVaultService from '@/background/service/legacyVault/LegacyVaultService';
+import { getRockPaperScissorsAddress } from '@/background/service/rps/rpsContractConfig';
 import keyringService, {
     DisplayedKeyring,
     EmptyKeyring,
@@ -91,6 +98,14 @@ import {
     LegacyVaultStatus,
     LegacyVaultSummary
 } from '@/shared/types/LegacyVault';
+import {
+    RpsActionResult,
+    RpsChoice,
+    RpsGameDetails,
+    RpsGameStatus,
+    RpsGameSummary,
+    RpsWinner
+} from '@/shared/types/RockPaperScissors';
 import {
     AddressRotationState,
     ConsolidationParams,
@@ -194,6 +209,7 @@ const LEGACY_VAULT_REPLACEMENT_RETRY_MAX_FEE_RATE = 100;
 const LEGACY_VAULT_HEIR_DISCOVERY_LOOKBACK = 256n;
 const LEGACY_VAULT_HEIR_DISCOVERY_MAX_ID = 16384n;
 const LEGACY_VAULT_HEIR_DISCOVERY_CACHE_MS = 60 * 1000;
+const RPS_DEFAULT_FEE_RATE = 10;
 
 const LEGACY_VAULT_UNIT_TO_SECONDS = {
     minutes: 60,
@@ -206,6 +222,13 @@ interface LegacyVaultContractContext {
     walletSigner: Wallet;
     contractAddress: string;
     contract: ILegacyVaultStateMachineContract;
+}
+
+interface RpsContractContext {
+    account: Account;
+    walletSigner: Wallet;
+    contractAddress: string;
+    contract: IRockPaperScissorsContract;
 }
 
 /**
@@ -4411,7 +4434,8 @@ export class WalletController {
             signTransaction: (params: TransactionParameters, amountAddition?: bigint) => Promise<any>;
             sendPresignedTransaction: (signedTx: any) => Promise<any>;
         },
-        params: TransactionParameters
+        params: TransactionParameters,
+        debugLabel = 'legacy-vault-debug'
     ): Promise<any> => {
         const attemptSend = async (attemptParams: TransactionParameters, attempt: number): Promise<any> => {
             // Sign first so we can validate raw tx hex locally before RPC broadcast.
@@ -4484,7 +4508,7 @@ export class WalletController {
                         }
                     }
 
-                    return `${message} [legacy-vault-debug ${base.join(' ')}]`;
+                    return `${message} [${debugLabel} ${base.join(' ')}]`;
                 };
 
                 if (signedTx.fundingTransactionRaw && !fundingTxLooksPlaceholder) {
@@ -4568,12 +4592,12 @@ export class WalletController {
                 const feeRate =
                     typeof attemptParams.feeRate === 'number' ? attemptParams.feeRate : LEGACY_VAULT_DEFAULT_FEE_RATE;
                 // Preserve errors already annotated with stage + debug details.
-                if (message.includes('[legacy-vault-debug')) {
+                if (message.includes(`[${debugLabel}`)) {
                     throw error;
                 }
 
                 throw new WalletControllerError(
-                    `${message} [legacy-vault-debug attempt=${attempt} feeRate=${feeRate} fundingHexLen=${fundingHexLen} interactionHexLen=${interactionHexLen} compiledScriptBytes=${compiledTargetScriptBytes} fundingTxId=${fundingTxId || 'none'} fundingIns=${fundingTxInputs} fundingOuts=${fundingTxOutputs} fundingPlaceholder=${fundingTxLooksPlaceholder ? 1 : 0} fundingBypass=${fundingBroadcastBypassed ? 1 : 0} interactionTxId=${interactionTxId}]`
+                    `${message} [${debugLabel} attempt=${attempt} feeRate=${feeRate} fundingHexLen=${fundingHexLen} interactionHexLen=${interactionHexLen} compiledScriptBytes=${compiledTargetScriptBytes} fundingTxId=${fundingTxId || 'none'} fundingIns=${fundingTxInputs} fundingOuts=${fundingTxOutputs} fundingPlaceholder=${fundingTxLooksPlaceholder ? 1 : 0} fundingBypass=${fundingBroadcastBypassed ? 1 : 0} interactionTxId=${interactionTxId}]`
                 );
             }
         };
@@ -5322,6 +5346,412 @@ export class WalletController {
 
     public legacyVault_refresh = async (vaultId: string): Promise<LegacyVaultDetails | null> => {
         return this.legacyVault_getVault(vaultId);
+    };
+
+    // Rock Paper Scissors contract methods
+    private getRpsContractContext = async (): Promise<RpsContractContext | null> => {
+        const chainType = this.getChainType();
+        const contractAddress = getRockPaperScissorsAddress(chainType);
+        if (!contractAddress) {
+            return null;
+        }
+
+        await Web3API.setNetwork(chainType);
+
+        const account = await this.getCurrentAccount();
+        if (!account) {
+            throw new WalletControllerError('No current account');
+        }
+
+        const walletSigner = await this.getWalletSigner();
+        const contract = getContract<IRockPaperScissorsContract>(
+            contractAddress,
+            ROCK_PAPER_SCISSORS_ABI,
+            Web3API.provider,
+            Web3API.network,
+            walletSigner.address
+        );
+
+        return {
+            account,
+            walletSigner,
+            contractAddress,
+            contract
+        };
+    };
+
+    private rpsParseGameId = (gameId: string): bigint | null => {
+        const trimmed = gameId.trim();
+        if (!/^\d+$/.test(trimmed)) {
+            return null;
+        }
+
+        try {
+            return BigInt(trimmed);
+        } catch {
+            return null;
+        }
+    };
+
+    private rpsErrorMessage = (error: unknown, fallback: string): string => {
+        if (error instanceof Error && error.message) {
+            return error.message;
+        }
+
+        return fallback;
+    };
+
+    private rpsChoiceToCode = (choice: RpsChoice): number => {
+        switch (choice) {
+            case 'ROCK':
+                return 1;
+            case 'PAPER':
+                return 2;
+            case 'SCISSORS':
+                return 3;
+            default:
+                return 0;
+        }
+    };
+
+    private rpsChoiceFromCode = (choice: number): RpsChoice | undefined => {
+        switch (choice) {
+            case 1:
+                return 'ROCK';
+            case 2:
+                return 'PAPER';
+            case 3:
+                return 'SCISSORS';
+            default:
+                return undefined;
+        }
+    };
+
+    private rpsStatusFromCode = (status: RpsStatusCode): RpsGameStatus => {
+        switch (status) {
+            case 1:
+                return 'OPEN';
+            case 2:
+                return 'READY';
+            case 3:
+                return 'RESOLVED';
+            default:
+                return 'ERROR';
+        }
+    };
+
+    private rpsWinnerFromCode = (winner: RpsWinnerCode): RpsWinner => {
+        switch (winner) {
+            case 1:
+                return 'PLAYER1';
+            case 2:
+                return 'PLAYER2';
+            case 3:
+                return 'DRAW';
+            default:
+                return 'NONE';
+        }
+    };
+
+    private buildRpsTxParams = (ctx: RpsContractContext): TransactionParameters => {
+        return {
+            signer: ctx.walletSigner.keypair,
+            mldsaSigner: ctx.walletSigner.mldsaKeypair,
+            refundTo: ctx.account.address,
+            maximumAllowedSatToSpend: 0n,
+            feeRate: RPS_DEFAULT_FEE_RATE,
+            network: Web3API.network,
+            priorityFee: 0n,
+            linkMLDSAPublicKeyToAddress: true
+        };
+    };
+
+    private buildRpsGameDetailsFromContract = (
+        gameId: bigint,
+        contractGame: Awaited<ReturnType<IRockPaperScissorsContract['getGame']>>,
+        viewerAddress: string,
+        currentBlock?: bigint
+    ): RpsGameDetails | null => {
+        const props = contractGame.properties;
+        if (!props.exists) {
+            return null;
+        }
+
+        const status = this.rpsStatusFromCode(props.status);
+        const winner = this.rpsWinnerFromCode(props.winner);
+        const player1Choice = this.rpsChoiceFromCode(props.choice1) || 'ROCK';
+        const player2Choice = this.rpsChoiceFromCode(props.choice2);
+
+        const player1 = this.legacyVaultAddressToString(props.player1);
+        const player2 = status === 'OPEN' ? undefined : this.legacyVaultAddressToString(props.player2) || undefined;
+        const normalizedPlayer1 = player1.trim().toLowerCase();
+        const normalizedPlayer2 = (player2 || '').trim().toLowerCase();
+
+        const isCreator = normalizedPlayer1 === viewerAddress;
+        const isJoiner = !!normalizedPlayer2 && normalizedPlayer2 === viewerAddress;
+        const isParticipant = isCreator || isJoiner;
+
+        const nowTs = Date.now();
+        const createdAtTs = this.estimateLegacyVaultTimestampFromBlock(props.createdAtBlock, currentBlock, nowTs);
+        const joinedAtTs =
+            props.joinedAtBlock > 0n
+                ? this.estimateLegacyVaultTimestampFromBlock(props.joinedAtBlock, currentBlock, nowTs)
+                : undefined;
+        const resolvedAtTs =
+            props.resolvedAtBlock > 0n
+                ? this.estimateLegacyVaultTimestampFromBlock(props.resolvedAtBlock, currentBlock, nowTs)
+                : undefined;
+
+        let winnerAddress: string | undefined;
+        if (winner === 'PLAYER1') {
+            winnerAddress = player1;
+        } else if (winner === 'PLAYER2') {
+            winnerAddress = player2;
+        }
+
+        return {
+            gameId: gameId.toString(),
+            status,
+            player1,
+            player2,
+            player1Choice,
+            player2Choice,
+            winner,
+            winnerAddress,
+            createdAtTs,
+            joinedAtTs,
+            resolvedAtTs,
+            isCreator,
+            isJoiner,
+            isParticipant,
+            canJoin: status === 'OPEN' && !isParticipant,
+            canResolve: status === 'READY'
+        };
+    };
+
+    public rps_listGames = async (): Promise<RpsGameSummary[]> => {
+        const ctx = await this.getRpsContractContext();
+        if (!ctx) {
+            return [];
+        }
+
+        try {
+            const viewerAddress = this.legacyVaultAddressToString(ctx.walletSigner.address).trim().toLowerCase();
+            const [playerGamesResult, openGamesResult, currentBlock] = await Promise.all([
+                ctx.contract.getGameIdsByPlayer(ctx.walletSigner.address),
+                ctx.contract.getOpenGameIds(),
+                Web3API.provider.getBlockNumber().catch(() => undefined)
+            ]);
+
+            const allIds = new Map<string, bigint>();
+            for (const id of playerGamesResult.properties.gameIds) {
+                allIds.set(id.toString(), id);
+            }
+            for (const id of openGamesResult.properties.gameIds) {
+                allIds.set(id.toString(), id);
+            }
+
+            const orderedIds = [...allIds.values()].sort((a, b) => (a === b ? 0 : a > b ? -1 : 1));
+            const detailResults = await Promise.allSettled(orderedIds.map((gameId) => ctx.contract.getGame(gameId)));
+
+            const games: RpsGameSummary[] = [];
+            detailResults.forEach((result, index) => {
+                if (result.status !== 'fulfilled') {
+                    console.warn(
+                        `RPS: failed to load game ${orderedIds[index]?.toString() || '(unknown)'}, skipping`,
+                        result.reason
+                    );
+                    return;
+                }
+
+                const game = this.buildRpsGameDetailsFromContract(
+                    orderedIds[index],
+                    result.value,
+                    viewerAddress,
+                    currentBlock
+                );
+                if (game) {
+                    games.push(game);
+                }
+            });
+
+            return games;
+        } catch (error) {
+            console.warn('RPS: failed to list games', error);
+            return [];
+        }
+    };
+
+    public rps_getGame = async (gameId: string): Promise<RpsGameDetails | null> => {
+        const ctx = await this.getRpsContractContext();
+        if (!ctx) {
+            return null;
+        }
+
+        const parsedGameId = this.rpsParseGameId(gameId);
+        if (parsedGameId === null) {
+            return null;
+        }
+
+        try {
+            const viewerAddress = this.legacyVaultAddressToString(ctx.walletSigner.address).trim().toLowerCase();
+            const [contractGame, currentBlock] = await Promise.all([
+                ctx.contract.getGame(parsedGameId),
+                Web3API.provider.getBlockNumber().catch(() => undefined)
+            ]);
+            return this.buildRpsGameDetailsFromContract(parsedGameId, contractGame, viewerAddress, currentBlock);
+        } catch (error) {
+            console.warn(`RPS: failed to load game ${gameId}`, error);
+            return null;
+        }
+    };
+
+    public rps_getSignerAddress = async (): Promise<string | null> => {
+        try {
+            const chainType = this.getChainType();
+            await Web3API.setNetwork(chainType);
+            const walletSigner = await this.getWalletSigner();
+            const address = this.legacyVaultAddressToString(walletSigner.address);
+            return address || null;
+        } catch (error) {
+            console.warn('RPS: failed to derive signer address', error);
+            return null;
+        }
+    };
+
+    public rps_createGame = async (choice: RpsChoice): Promise<RpsActionResult> => {
+        const ctx = await this.getRpsContractContext();
+        if (!ctx) {
+            return {
+                ok: false,
+                error: 'Rock Paper Scissors contract is not configured for this network.'
+            };
+        }
+
+        const choiceCode = this.rpsChoiceToCode(choice);
+        if (!choiceCode) {
+            return {
+                ok: false,
+                error: `Invalid choice: ${choice}`
+            };
+        }
+
+        try {
+            const simulation = await ctx.contract.createGame(choiceCode);
+            if (simulation.revert) {
+                return { ok: false, error: simulation.revert };
+            }
+
+            const receipt = await this.legacyVaultSendSimulationWithPreflight(
+                simulation,
+                this.buildRpsTxParams(ctx),
+                'rps-debug'
+            );
+
+            return {
+                ok: true,
+                gameId: simulation.properties.gameId.toString(),
+                txid: receipt.transactionId
+            };
+        } catch (error) {
+            return {
+                ok: false,
+                error: this.rpsErrorMessage(error, 'Failed to create Rock Paper Scissors game.')
+            };
+        }
+    };
+
+    public rps_joinGame = async (gameId: string, choice: RpsChoice): Promise<RpsActionResult> => {
+        const ctx = await this.getRpsContractContext();
+        if (!ctx) {
+            return {
+                ok: false,
+                error: 'Rock Paper Scissors contract is not configured for this network.'
+            };
+        }
+
+        const parsedGameId = this.rpsParseGameId(gameId);
+        if (parsedGameId === null) {
+            return {
+                ok: false,
+                error: 'Invalid game ID.'
+            };
+        }
+
+        const choiceCode = this.rpsChoiceToCode(choice);
+        if (!choiceCode) {
+            return {
+                ok: false,
+                error: `Invalid choice: ${choice}`
+            };
+        }
+
+        try {
+            const simulation = await ctx.contract.joinGame(parsedGameId, choiceCode);
+            if (simulation.revert) {
+                return { ok: false, error: simulation.revert };
+            }
+
+            const receipt = await this.legacyVaultSendSimulationWithPreflight(
+                simulation,
+                this.buildRpsTxParams(ctx),
+                'rps-debug'
+            );
+
+            return {
+                ok: true,
+                gameId,
+                txid: receipt.transactionId
+            };
+        } catch (error) {
+            return {
+                ok: false,
+                error: this.rpsErrorMessage(error, 'Failed to join Rock Paper Scissors game.')
+            };
+        }
+    };
+
+    public rps_resolveGame = async (gameId: string): Promise<RpsActionResult> => {
+        const ctx = await this.getRpsContractContext();
+        if (!ctx) {
+            return {
+                ok: false,
+                error: 'Rock Paper Scissors contract is not configured for this network.'
+            };
+        }
+
+        const parsedGameId = this.rpsParseGameId(gameId);
+        if (parsedGameId === null) {
+            return {
+                ok: false,
+                error: 'Invalid game ID.'
+            };
+        }
+
+        try {
+            const simulation = await ctx.contract.resolveGame(parsedGameId);
+            if (simulation.revert) {
+                return { ok: false, error: simulation.revert };
+            }
+
+            const receipt = await this.legacyVaultSendSimulationWithPreflight(
+                simulation,
+                this.buildRpsTxParams(ctx),
+                'rps-debug'
+            );
+
+            return {
+                ok: true,
+                gameId,
+                txid: receipt.transactionId,
+                winner: this.rpsWinnerFromCode(simulation.properties.winner)
+            };
+        } catch (error) {
+            return {
+                ok: false,
+                error: this.rpsErrorMessage(error, 'Failed to resolve Rock Paper Scissors game.')
+            };
+        }
     };
 
     /**

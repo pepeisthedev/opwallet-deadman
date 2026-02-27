@@ -218,7 +218,13 @@ export const WALLET_CONTROLLER_METHODS = [
     'legacyVault_checkIn',
     'legacyVault_trigger',
     'legacyVault_claim',
-    'legacyVault_refresh'
+    'legacyVault_refresh',
+    'rps_listGames',
+    'rps_getGame',
+    'rps_getSignerAddress',
+    'rps_createGame',
+    'rps_joinGame',
+    'rps_resolveGame'
 ] as const;
 
 export type WalletControllerMethod = (typeof WALLET_CONTROLLER_METHODS)[number];

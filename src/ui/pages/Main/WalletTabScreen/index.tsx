@@ -53,6 +53,7 @@ import {
     HistoryOutlined,
     LockOutlined,
     QrcodeOutlined,
+    ScissorOutlined,
     SafetyCertificateOutlined,
     SendOutlined,
     SettingOutlined,
@@ -988,6 +989,12 @@ export default function WalletTabScreen() {
                                 label="Inheritance"
                                 icon={<SafetyCertificateOutlined style={{ fontSize: 18, color: '#60A5FA' }} />}
                                 onClick={() => navigate(RouteTypes.LegacyVaultHomeScreen)}
+                            />
+
+                            <ActionButton
+                                label="RPS"
+                                icon={<ScissorOutlined style={{ fontSize: 18, color: colors.main }} />}
+                                onClick={() => navigate(RouteTypes.RockPaperScissorsHomeScreen)}
                             />
                         </div>
 
