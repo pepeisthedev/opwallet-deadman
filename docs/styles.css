@@ -202,6 +202,14 @@ h1 {
     line-height: 1.6;
 }
 
+.panel code {
+    color: var(--btc);
+    background: rgba(247, 147, 26, 0.14);
+    border: 1px solid rgba(247, 147, 26, 0.35);
+    border-radius: 6px;
+    padding: 0.08rem 0.35rem;
+}
+
 .feature-grid {
     display: grid;
     gap: 10px;

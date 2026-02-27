@@ -32,6 +32,17 @@
         </header>
 
         <main class="content">
+            <section class="panel panel-video" id="demo">
+                <h2>Demo Inheritance vault</h2>
+           
+                <div class="video-shell">
+                    <video controls preload="metadata" poster="./cover.png">
+                        <source src="https://pub-59fac2662d16414c8202fc478b0c90b7.r2.dev/inherit-demo.mp4" type="video/mp4" />
+                        Your browser does not support HTML5 video.
+                    </video>
+                </div>
+            </section>
+
             <section class="panel" id="about">
                 <h2>Project Overview</h2>
                 <p>
@@ -73,15 +84,15 @@
                 </ol>
             </section>
 
-            <section class="panel panel-video" id="demo">
-                <h2>Demo Inheritance vault</h2>
-           
-                <div class="video-shell">
-                    <video controls preload="metadata" poster="./cover.png">
-                        <source src="https://pub-59fac2662d16414c8202fc478b0c90b7.r2.dev/inherit-demo.mp4" type="video/mp4" />
-                        Your browser does not support HTML5 video.
-                    </video>
-                </div>
+            <section class="panel" id="testing">
+                <h2>Test the Extension</h2>
+                <ol class="flow-list">
+                    <li>Clone the wallet repository to your machine.</li>
+                    <li>Run <code>npm install</code> and then build it, for example with <code>npm run build:chrome</code>.</li>
+                    <li>Open your browser extension page and enable Developer mode.</li>
+                    <li>Choose Load unpacked and import the built extension folder from <code>dist/</code>.</li>
+                    <li>Open the wallet and test the inheritance flow. The README has the full setup details.</li>
+                </ol>
             </section>
         </main>
     </body>
