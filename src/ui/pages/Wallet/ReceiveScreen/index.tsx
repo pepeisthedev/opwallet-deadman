@@ -609,6 +609,66 @@ export default function ReceiveScreen() {
                                 />
                             </div>
                         </div>
+
+                        {isOP20 && currentAccount.pubkey && (
+                            <div
+                                style={{
+                                    width: '100%',
+                                    backgroundColor: colors.bg3,
+                                    borderRadius: 12,
+                                    padding: 14,
+                                    gap: 10,
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    border: `1px solid ${colors.border}`
+                                }}>
+                                <Text
+                                    text="Classical Public Key"
+                                    style={{
+                                        fontSize: 12,
+                                        fontWeight: 600,
+                                        color: colors.textDim,
+                                        textTransform: 'uppercase',
+                                        letterSpacing: 0.5
+                                    }}
+                                />
+                                <Text
+                                    text={`0x${currentAccount.pubkey.replace(/^0x/i, '')}`}
+                                    style={{
+                                        fontSize: 13,
+                                        color: colors.text,
+                                        fontFamily: 'monospace',
+                                        lineHeight: '20px',
+                                        wordBreak: 'break-all'
+                                    }}
+                                />
+                                <div
+                                    onClick={() => {
+                                        copyToClipboard(`0x${currentAccount.pubkey.replace(/^0x/i, '')}`).then(() => {
+                                            tools.toastSuccess('Classical public key copied');
+                                        });
+                                    }}
+                                    style={{
+                                        display: 'flex',
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: 8,
+                                        backgroundColor: colors.bg2,
+                                        border: `1px solid ${colors.border}`,
+                                        borderRadius: 10,
+                                        padding: 10,
+                                        marginTop: 2,
+                                        cursor: 'pointer'
+                                    }}>
+                                    <CopyOutlined style={{ fontSize: 18, color: colors.text }} />
+                                    <Text
+                                        text="Copy Classical Public Key"
+                                        style={{ fontSize: 14, fontWeight: 600, color: colors.text }}
+                                    />
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </Column>
             </Content>

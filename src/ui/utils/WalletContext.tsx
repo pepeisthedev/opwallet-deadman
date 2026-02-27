@@ -382,6 +382,7 @@ export interface WalletController {
     // Legacy Vault (Deadman Wallet) MVP
     legacyVault_listVaults(): Promise<LegacyVaultSummary[]>;
     legacyVault_getVault(vaultId: string): Promise<LegacyVaultDetails | null>;
+    legacyVault_getSignerAddress(): Promise<string | null>;
     legacyVault_createDraft(input: LegacyVaultCreateInput): Promise<LegacyVaultDraftResult>;
     legacyVault_finalizeAndCreate(input: LegacyVaultCreateInput): Promise<LegacyVaultCreateResult>;
     legacyVault_checkIn(vaultId: string): Promise<LegacyVaultActionResult>;

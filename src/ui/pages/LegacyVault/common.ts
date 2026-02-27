@@ -111,6 +111,10 @@ export function legacyVaultTxExplorerUrl(txid?: string): string | null {
     return `https://opscan.org/transactions/${encodeURIComponent(value)}?network=op_testnet`;
 }
 
+export function normalizeLegacyVaultAddress(value?: string): string {
+    return (value || '').trim().toLowerCase();
+}
+
 export function statusColor(status: LegacyVaultStatus): string {
     switch (status) {
         case 'ACTIVE':

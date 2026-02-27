@@ -37,6 +37,10 @@ interface TokenWithBalance extends OPTokenInfo {
     isLoading?: boolean;
 }
 
+function normalizeLegacyVaultAddress(value?: string): string {
+    return (value || '').trim().toLowerCase();
+}
+
 const colors = {
     main: '#f37413',
     background: '#212121',
@@ -102,6 +106,7 @@ export function OPNetList() {
     const [modalToken, setModalToken] = useState<string | null>(null);
     const [migrationWarningShown, setMigrationWarningShown] = useState(false);
     const [deadmanVaults, setDeadmanVaults] = useState<LegacyVaultSummary[]>([]);
+    const [deadmanVaultRoleMap, setDeadmanVaultRoleMap] = useState<Record<string, { isOwner: boolean }>>({});
     const [isDeadmanLoading, setIsDeadmanLoading] = useState(false);
     const [isDeadmanCheckingIn, setIsDeadmanCheckingIn] = useState(false);
     const [deadmanNowTs, setDeadmanNowTs] = useState(Date.now());
@@ -119,13 +124,34 @@ export function OPNetList() {
         try {
             const list = await wallet.legacyVault_listVaults();
             setDeadmanVaults(list);
+
+            const signerAddress = await wallet.legacyVault_getSignerAddress().catch(() => null);
+            const currentAddress = normalizeLegacyVaultAddress(signerAddress || '');
+            if (!currentAddress || list.length === 0) {
+                setDeadmanVaultRoleMap({});
+                return;
+            }
+
+            const detailsList = await Promise.all(list.map((vault) => wallet.legacyVault_getVault(vault.vaultId).catch(() => null)));
+            const nextRoleMap: Record<string, { isOwner: boolean }> = {};
+            detailsList.forEach((details, index) => {
+                if (!details) {
+                    return;
+                }
+
+                nextRoleMap[list[index].vaultId] = {
+                    isOwner: normalizeLegacyVaultAddress(details.ownerAddress) === currentAddress
+                };
+            });
+            setDeadmanVaultRoleMap(nextRoleMap);
         } catch (error) {
             console.error('Failed to load Deadman vaults:', error);
             setDeadmanVaults([]);
+            setDeadmanVaultRoleMap({});
         } finally {
             setIsDeadmanLoading(false);
         }
-    }, [isSimpleMode, wallet]);
+    }, [currentAccount.pubkey, isSimpleMode, wallet]);
 
     useEffect(() => {
         if (!isSimpleMode) return;
@@ -200,6 +226,18 @@ export function OPNetList() {
 
         return formatDeadmanCountdown(quickDeadmanVault.nextDeadlineTs);
     }, [quickDeadmanVault, deadmanNowTs]);
+
+    const showQuickInheritanceSection = useMemo(() => {
+        if (!isSimpleMode || !quickDeadmanVault) {
+            return false;
+        }
+
+        if (quickDeadmanVault.status === 'CLAIMED') {
+            return false;
+        }
+
+        return Boolean(deadmanVaultRoleMap[quickDeadmanVault.vaultId]?.isOwner);
+    }, [deadmanVaultRoleMap, isSimpleMode, quickDeadmanVault]);
 
     // Ensure default tokens are included only on first launch
     const ensureDefaultTokens = useCallback(
@@ -665,7 +703,7 @@ export function OPNetList() {
                 </button>
             </div>
 
-            {isSimpleMode && (
+            {showQuickInheritanceSection && (
                 <div
                     style={{
                         width: 'calc(100% + 24px)',

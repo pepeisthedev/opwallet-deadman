@@ -5,7 +5,7 @@ import { ChainType } from '@/shared/constant/chainType';
  * Example format: bc1p... (P2OP) or the supported contract address string used by opnet getContract().
  */
 export const LEGACY_VAULT_STATE_MACHINE_ADDRESSES: Partial<Record<ChainType, string>> = {
-    [ChainType.OPNET_TESTNET]: 'opt1sqqqrqvhyq9hd9gpk4356kvmvygdqqxn08qtflya7',
+    [ChainType.OPNET_TESTNET]: 'opt1sqqdfyk3f4u8ard33kvjau0n8477csrut050g92pc',
     [ChainType.BITCOIN_REGTEST]: ''
 };
 

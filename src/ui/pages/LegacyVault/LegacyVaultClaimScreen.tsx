@@ -11,6 +11,7 @@ import {
     formatPercentFromBps,
     formatSats,
     lvColors,
+    normalizeLegacyVaultAddress,
     pageContainerStyle,
     panelStyle,
     primaryButtonStyle,
@@ -36,6 +37,7 @@ export default function LegacyVaultClaimScreen() {
     const [vault, setVault] = useState<LegacyVaultDetails | null>(null);
     const [loading, setLoading] = useState(true);
     const [claiming, setClaiming] = useState(false);
+    const [viewerAddress, setViewerAddress] = useState('');
 
     const loadVault = useCallback(async () => {
         if (!vaultId) {
@@ -60,11 +62,42 @@ export default function LegacyVaultClaimScreen() {
         void loadVault();
     }, [loadVault]);
 
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadViewerAddress = async () => {
+            try {
+                const signerAddress = await wallet.legacyVault_getSignerAddress();
+                if (!cancelled) {
+                    setViewerAddress(normalizeLegacyVaultAddress(signerAddress || ''));
+                }
+            } catch {
+                if (!cancelled) {
+                    setViewerAddress('');
+                }
+            }
+        };
+
+        void loadViewerAddress();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [wallet]);
+
+    const viewerIsHeir = useMemo(() => {
+        if (!vault || !viewerAddress) {
+            return false;
+        }
+        return vault.heirs.some((heir) => normalizeLegacyVaultAddress(heir.address) === viewerAddress);
+    }, [vault, viewerAddress]);
+
     const claimDisabledReason = useMemo(() => {
         if (!vault) return 'Vault not found';
+        if (!viewerIsHeir) return 'Only a registered heir wallet can execute claim.';
         if (vault.status !== 'CLAIMABLE') return `Vault is ${vault.status}. Trigger it after overdue before claiming.`;
         return null;
-    }, [vault]);
+    }, [vault, viewerIsHeir]);
 
     const handleClaim = async () => {
         if (!vault) return;
@@ -175,12 +208,14 @@ export default function LegacyVaultClaimScreen() {
                 )}
 
                 <div style={{ display: 'flex', gap: '8px' }}>
-                    <button
-                        style={withDisabledButtonStyle(primaryButtonStyle, Boolean(claimDisabledReason) || claiming)}
-                        onClick={() => void handleClaim()}
-                        disabled={Boolean(claimDisabledReason) || claiming}>
-                        {claiming ? 'Claiming...' : 'Execute Claim'}
-                    </button>
+                    {viewerIsHeir && (
+                        <button
+                            style={withDisabledButtonStyle(primaryButtonStyle, Boolean(claimDisabledReason) || claiming)}
+                            onClick={() => void handleClaim()}
+                            disabled={Boolean(claimDisabledReason) || claiming}>
+                            {claiming ? 'Claiming...' : 'Execute Claim'}
+                        </button>
+                    )}
                     <button
                         style={withDisabledButtonStyle(secondaryButtonStyle, claiming)}
                         onClick={() => navigate(RouteTypes.LegacyVaultStatusScreen, { vaultId: vault.vaultId })}

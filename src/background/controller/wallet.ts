@@ -191,6 +191,9 @@ const LEGACY_VAULT_BLOCK_MS_ESTIMATE = LEGACY_VAULT_BLOCK_SECONDS_ESTIMATE * 100
 const LEGACY_VAULT_MAX_PAYOUT_REF_BYTES = 200;
 const LEGACY_VAULT_DEFAULT_FEE_RATE = 10;
 const LEGACY_VAULT_REPLACEMENT_RETRY_MAX_FEE_RATE = 100;
+const LEGACY_VAULT_HEIR_DISCOVERY_LOOKBACK = 256n;
+const LEGACY_VAULT_HEIR_DISCOVERY_MAX_ID = 16384n;
+const LEGACY_VAULT_HEIR_DISCOVERY_CACHE_MS = 60 * 1000;
 
 const LEGACY_VAULT_UNIT_TO_SECONDS = {
     minutes: 60,
@@ -299,6 +302,8 @@ export class WalletController {
     // Keyring cache - invalidated when keyrings are mutated
     private walletKeyringsCache: WalletKeyring[] | null = null;
     private keyringsCacheNetworkType: NetworkType | null = null;
+    private legacyVaultHeirDiscoveryCache: Map<string, { timestamp: number; summaries: LegacyVaultSummary[] }> =
+        new Map();
 
     /**
      * Invalidate the keyring cache. Call this after any keyring mutation.
@@ -4262,6 +4267,25 @@ export class WalletController {
         );
     };
 
+    private legacyVaultResolveParticipantAddressFromLocalAccounts = async (inputRaw: string): Promise<Address | null> => {
+        const input = inputRaw.trim().toLowerCase();
+        if (!input) {
+            return null;
+        }
+
+        try {
+            const accounts = await this.getAccounts();
+            const localAccount = accounts.find((account) => account.address?.trim().toLowerCase() === input);
+            if (!localAccount?.pubkey || !this.legacyVaultLooksLikeHexPublicKey(localAccount.pubkey)) {
+                return null;
+            }
+
+            return Address.fromString(localAccount.pubkey.replace(/^0x/i, ''));
+        } catch {
+            return null;
+        }
+    };
+
     private legacyVaultResolveParticipantAddress = async (inputRaw: string, participantLabel: string): Promise<Address> => {
         const input = inputRaw.trim();
         const normalizedHex = input.replace(/^0x/i, '');
@@ -4272,6 +4296,11 @@ export class WalletController {
             } catch {
                 throw new WalletControllerError(`Invalid ${participantLabel} public key hex: ${input}.`);
             }
+        }
+
+        const localResolved = await this.legacyVaultResolveParticipantAddressFromLocalAccounts(input);
+        if (localResolved && !localResolved.isDead()) {
+            return localResolved;
         }
 
         try {
@@ -4657,13 +4686,18 @@ export class WalletController {
             lastCheckInTs + (intervalSec + graceSec) * 1000
         );
 
-        const status = this.mapLegacyVaultContractStatus(
+        let status = this.mapLegacyVaultContractStatus(
             props.status,
             currentBlock,
             props.lastCheckInBlock,
             intervalBlocks,
             graceBlocks
         );
+        // Fallback to a local deadline-based status when block height is unavailable or stale.
+        // The contract still enforces the real rule on trigger, but this keeps the UI from getting stuck in ACTIVE.
+        if (status === 'ACTIVE' && nextDeadlineTs > 0 && nowTs >= nextDeadlineTs) {
+            status = 'OVERDUE';
+        }
 
         const cachedHeirLabels = new Map(
             (cached?.heirs || []).map((heir) => [heir.address.toLowerCase(), heir.label || ''])
@@ -4734,6 +4768,161 @@ export class WalletController {
         return this.buildLegacyVaultDetailsFromContract(vaultId, contractVault, currentBlock);
     };
 
+    private legacyVaultToSummary = (vault: LegacyVaultDetails): LegacyVaultSummary => {
+        return {
+            vaultId: vault.vaultId,
+            label: vault.label,
+            mode: vault.mode,
+            status: vault.status,
+            nextDeadlineTs: vault.nextDeadlineTs,
+            lastCheckInTs: vault.lastCheckInTs,
+            amountSats: vault.amountSats,
+            heirsCount: vault.heirsCount
+        };
+    };
+
+    private legacyVaultHeirDiscoveryCacheKey = (
+        chainType: ChainType,
+        contractAddress: string,
+        signerAddress: string
+    ): string => {
+        return `${chainType}:${contractAddress}:${signerAddress}`;
+    };
+
+    private legacyVaultIsHeirInContractVault = (
+        contractVault: Awaited<ReturnType<ILegacyVaultStateMachineContract['getVault']>>,
+        signerAddress: string
+    ): boolean => {
+        return contractVault.properties.heirs.some(
+            (heir) => this.legacyVaultAddressToString(heir).trim().toLowerCase() === signerAddress
+        );
+    };
+
+    private legacyVaultFindHighestExistingVaultId = async (
+        ctx: LegacyVaultContractContext
+    ): Promise<bigint | null> => {
+        const exists = async (vaultId: bigint): Promise<boolean> => {
+            try {
+                const result = await ctx.contract.getVault(vaultId);
+                return Boolean(result.properties.exists);
+            } catch {
+                return false;
+            }
+        };
+
+        if (!(await exists(1n))) {
+            return null;
+        }
+
+        let low = 1n;
+        let high = 2n;
+        while (high <= LEGACY_VAULT_HEIR_DISCOVERY_MAX_ID) {
+            if (!(await exists(high))) {
+                break;
+            }
+            low = high;
+            high = high * 2n;
+        }
+
+        if (high > LEGACY_VAULT_HEIR_DISCOVERY_MAX_ID) {
+            high = LEGACY_VAULT_HEIR_DISCOVERY_MAX_ID;
+            if (await exists(high)) {
+                return high;
+            }
+        }
+
+        // Binary search: low exists, high does not (or is first candidate above max).
+        while (low + 1n < high) {
+            const mid = (low + high) / 2n;
+            if (await exists(mid)) {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+
+        return low;
+    };
+
+    private legacyVaultDiscoverHeirSummaries = async (
+        ctx: LegacyVaultContractContext,
+        signerAddress: string,
+        currentBlock?: bigint
+    ): Promise<LegacyVaultSummary[]> => {
+        if (!signerAddress) {
+            return [];
+        }
+
+        const chainType = this.getChainType();
+        const cacheKey = this.legacyVaultHeirDiscoveryCacheKey(chainType, ctx.contractAddress, signerAddress);
+        const now = Date.now();
+        const cached = this.legacyVaultHeirDiscoveryCache.get(cacheKey);
+        if (cached && now - cached.timestamp < LEGACY_VAULT_HEIR_DISCOVERY_CACHE_MS) {
+            return cached.summaries;
+        }
+
+        const highestExistingId = await this.legacyVaultFindHighestExistingVaultId(ctx);
+        if (!highestExistingId || highestExistingId <= 0n) {
+            const empty: LegacyVaultSummary[] = [];
+            this.legacyVaultHeirDiscoveryCache.set(cacheKey, { timestamp: now, summaries: empty });
+            return empty;
+        }
+
+        const minId =
+            highestExistingId > LEGACY_VAULT_HEIR_DISCOVERY_LOOKBACK
+                ? highestExistingId - LEGACY_VAULT_HEIR_DISCOVERY_LOOKBACK + 1n
+                : 1n;
+
+        const discovered: LegacyVaultSummary[] = [];
+        const BATCH_SIZE = 16n;
+
+        for (let start = highestExistingId; start >= minId; ) {
+            const batchIds: bigint[] = [];
+            for (let i = 0n; i < BATCH_SIZE && start - i >= minId; i++) {
+                batchIds.push(start - i);
+            }
+
+            const batchVaults = await Promise.all(
+                batchIds.map(async (vaultId) => {
+                    try {
+                        const contractVault = await ctx.contract.getVault(vaultId);
+                        return { vaultId, contractVault };
+                    } catch {
+                        return null;
+                    }
+                })
+            );
+
+            for (const item of batchVaults) {
+                if (!item || !item.contractVault.properties.exists) {
+                    continue;
+                }
+
+                if (!this.legacyVaultIsHeirInContractVault(item.contractVault, signerAddress)) {
+                    continue;
+                }
+
+                const details = await this.buildLegacyVaultDetailsFromContract(
+                    item.vaultId.toString(),
+                    item.contractVault,
+                    currentBlock
+                );
+                if (details) {
+                    discovered.push(this.legacyVaultToSummary(details));
+                }
+            }
+
+            const nextStart = start - BATCH_SIZE;
+            if (nextStart < minId) {
+                break;
+            }
+            start = nextStart;
+        }
+
+        this.legacyVaultHeirDiscoveryCache.set(cacheKey, { timestamp: now, summaries: discovered });
+        return discovered;
+    };
+
     public legacyVault_listVaults = async (): Promise<LegacyVaultSummary[]> => {
         const localVaults = await legacyVaultService.listVaults();
         const ctx = await this.getLegacyVaultContractContext();
@@ -4754,24 +4943,43 @@ export class WalletController {
 
             const contractSummaries = details
                 .filter((vault): vault is LegacyVaultDetails => !!vault)
-                .map((vault) => ({
-                    vaultId: vault.vaultId,
-                    label: vault.label,
-                    mode: vault.mode,
-                    status: vault.status,
-                    nextDeadlineTs: vault.nextDeadlineTs,
-                    lastCheckInTs: vault.lastCheckInTs,
-                    amountSats: vault.amountSats,
-                    heirsCount: vault.heirsCount
-                }));
+                .map((vault) => this.legacyVaultToSummary(vault));
 
             // Keep only local-only (non-numeric) vaults visible alongside contract-backed vaults.
             // Numeric IDs are contract IDs and can become stale after redeploying to a new contract address.
             const seen = new Set(contractSummaries.map((vault) => vault.vaultId));
+            const currentWalletAddress = this.legacyVaultAddressToString(ctx.walletSigner.address).trim().toLowerCase();
+            const heirVisibleCachedContractVaults = (
+                await Promise.all(
+                    localVaults
+                        .filter((vault) => this.parseLegacyVaultNumericId(vault.vaultId) !== null && !seen.has(vault.vaultId))
+                        .map(async (vault) => {
+                            const details = await legacyVaultService.getVault(vault.vaultId).catch(() => null);
+                            if (!details || !currentWalletAddress) {
+                                return null;
+                            }
+
+                            const isCurrentWalletHeir = details.heirs.some(
+                                (heir) => (heir.address || '').trim().toLowerCase() === currentWalletAddress
+                            );
+
+                            return isCurrentWalletHeir ? vault : null;
+                        })
+                )
+            ).filter((vault): vault is LegacyVaultSummary => !!vault);
+
+            const heirDiscoveredContractSummaries =
+                contractSummaries.length === 0
+                    ? await this.legacyVaultDiscoverHeirSummaries(ctx, currentWalletAddress, currentBlock)
+                    : [];
+
+            const mergedSeen = new Set([...seen, ...heirDiscoveredContractSummaries.map((vault) => vault.vaultId)]);
             const merged = [
                 ...contractSummaries,
+                ...heirDiscoveredContractSummaries,
+                ...heirVisibleCachedContractVaults,
                 ...localVaults.filter(
-                    (vault) => this.parseLegacyVaultNumericId(vault.vaultId) === null && !seen.has(vault.vaultId)
+                    (vault) => this.parseLegacyVaultNumericId(vault.vaultId) === null && !mergedSeen.has(vault.vaultId)
                 )
             ];
 
@@ -4802,6 +5010,19 @@ export class WalletController {
         } catch (error) {
             console.warn(`LegacyVault: failed to read vault ${vaultId} from contract, falling back to local cache`, error);
             return legacyVaultService.getVault(vaultId);
+        }
+    };
+
+    public legacyVault_getSignerAddress = async (): Promise<string | null> => {
+        try {
+            const chainType = this.getChainType();
+            await Web3API.setNetwork(chainType);
+            const walletSigner = await this.getWalletSigner();
+            const address = this.legacyVaultAddressToString(walletSigner.address);
+            return address || null;
+        } catch (error) {
+            console.warn('LegacyVault: failed to derive signer address', error);
+            return null;
         }
     };
 

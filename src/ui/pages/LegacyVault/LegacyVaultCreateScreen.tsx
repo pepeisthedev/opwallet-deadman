@@ -3,9 +3,9 @@ import { ChangeEvent, useMemo, useState } from 'react';
 import { LegacyVaultCreateInput, LegacyVaultTimeUnit } from '@/shared/types/LegacyVault';
 import { Header, Layout } from '@/ui/components';
 import { useTools } from '@/ui/components/ActionComponent';
+import { RouteTypes, useNavigate } from '@/ui/pages/routeTypes';
 import { useSetLegacyVaultDraft } from '@/ui/state/legacyVault/hooks';
 import { useWallet } from '@/ui/utils';
-import { RouteTypes, useNavigate } from '@/ui/pages/routeTypes';
 
 import { inputStyle, lvColors, pageContainerStyle, panelStyle, primaryButtonStyle, secondaryButtonStyle } from './common';
 
@@ -23,14 +23,14 @@ export default function LegacyVaultCreateScreen() {
     const navigate = useNavigate();
     const setDraft = useSetLegacyVaultDraft();
 
-    const [label, setLabel] = useState('Family Inheritance Demo');
+    const [label, setLabel] = useState('Family Inheritance');
     const [amountSats, setAmountSats] = useState('100000');
     const [intervalValue, setIntervalValue] = useState('1');
     const [intervalUnit, setIntervalUnit] = useState<LegacyVaultTimeUnit>('minutes');
     const [graceValue, setGraceValue] = useState('1');
     const [graceUnit, setGraceUnit] = useState<LegacyVaultTimeUnit>('minutes');
     const [heirs, setHeirs] = useState<HeirDraftRow[]>([
-        { label: 'Heir A', address: 'opt1p8drc8qg3ezvlczkh75g7valh9d576ller48gc8ydtgrv0de9t64ss82fda', sharePercent: '100' }
+        { label: 'Heir A', address: '', sharePercent: '100' }
     ]);
     const [submitting, setSubmitting] = useState(false);
 
@@ -144,7 +144,7 @@ export default function LegacyVaultCreateScreen() {
                                     <input
                                         value={heir.address}
                                         onChange={(e) => updateHeir(index, { address: e.target.value })}
-                                        placeholder="Heir address (testnet/demo)"
+                                        placeholder="Heir address"
                                         style={{ ...inputStyle, flex: 1 }}
                                     />
                                     <button
@@ -174,7 +174,7 @@ export default function LegacyVaultCreateScreen() {
 
                 <div style={{ ...panelStyle, marginBottom: '12px' }}>
                     <div style={{ color: lvColors.text, fontWeight: 700, fontSize: '13px', marginBottom: '8px' }}>
-                        Check-in Policy (Demo Fast Mode Friendly)
+                        Check-in Policy
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                         <div>
@@ -209,9 +209,6 @@ export default function LegacyVaultCreateScreen() {
                                 </select>
                             </div>
                         </div>
-                    </div>
-                    <div style={{ color: lvColors.textMuted, fontSize: '10px', marginTop: '8px', lineHeight: 1.4 }}>
-                        Tip: use 1 minute interval + 1 minute grace for live demos. Then wait or miss a check-in to trigger and claim.
                     </div>
                 </div>
 

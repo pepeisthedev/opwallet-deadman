@@ -15,6 +15,7 @@ import {
     legacyVaultPendingActionLabel,
     legacyVaultTxExplorerUrl,
     lvColors,
+    normalizeLegacyVaultAddress,
     pageContainerStyle,
     panelStyle,
     primaryButtonStyle,
@@ -36,6 +37,43 @@ interface LegacyVaultPendingNotice {
     atTs: number;
 }
 
+const LEGACY_VAULT_PENDING_NOTICE_STORAGE_PREFIX = 'legacyVaultPendingNotice:';
+
+function legacyVaultPendingNoticeStorageKey(vaultId: string): string {
+    return `${LEGACY_VAULT_PENDING_NOTICE_STORAGE_PREFIX}${vaultId}`;
+}
+
+function readLegacyVaultPendingNotice(vaultId: string): LegacyVaultPendingNotice | null {
+    if (!vaultId || typeof window === 'undefined') {
+        return null;
+    }
+
+    try {
+        const raw = window.localStorage.getItem(legacyVaultPendingNoticeStorageKey(vaultId));
+        if (!raw) {
+            return null;
+        }
+
+        const parsed = JSON.parse(raw) as Partial<LegacyVaultPendingNotice> | null;
+        if (!parsed || typeof parsed !== 'object') {
+            return null;
+        }
+
+        const action = parsed.action;
+        if (action !== 'create' && action !== 'checkIn' && action !== 'trigger' && action !== 'claim') {
+            return null;
+        }
+
+        return {
+            action,
+            txid: typeof parsed.txid === 'string' && parsed.txid.trim() ? parsed.txid : undefined,
+            atTs: typeof parsed.atTs === 'number' && Number.isFinite(parsed.atTs) ? parsed.atTs : Date.now()
+        };
+    } catch {
+        return null;
+    }
+}
+
 export default function LegacyVaultStatusScreen() {
     const wallet = useWallet();
     const tools = useTools();
@@ -49,15 +87,8 @@ export default function LegacyVaultStatusScreen() {
     const [vault, setVault] = useState<LegacyVaultDetails | null>(null);
     const [loading, setLoading] = useState(true);
     const [actionBusy, setActionBusy] = useState<string | null>(null);
-    const [pendingNotice, setPendingNotice] = useState<LegacyVaultPendingNotice | null>(() =>
-        routeState?.pendingAction
-            ? {
-                  action: routeState.pendingAction,
-                  txid: routeState.pendingTxid,
-                  atTs: Date.now()
-              }
-            : null
-    );
+    const [pendingNotice, setPendingNotice] = useState<LegacyVaultPendingNotice | null>(null);
+    const [viewerAddress, setViewerAddress] = useState('');
 
     const loadVault = useCallback(async () => {
         if (!vaultId) {
@@ -85,19 +116,110 @@ export default function LegacyVaultStatusScreen() {
     }, [loadVault]);
 
     useEffect(() => {
-        if (!routeState?.pendingAction) {
+        if (!vaultId) {
             return;
         }
 
-        setPendingNotice({
-            action: routeState.pendingAction,
-            txid: routeState.pendingTxid,
-            atTs: Date.now()
-        });
-    }, [routeState?.pendingAction, routeState?.pendingTxid]);
+        const timer = window.setInterval(() => {
+            void loadVault();
+        }, 15000);
+
+        return () => window.clearInterval(timer);
+    }, [loadVault, vaultId]);
+
+    useEffect(() => {
+        if (!vaultId) {
+            setPendingNotice(null);
+            return;
+        }
+
+        if (routeState?.pendingAction) {
+            setPendingNotice({
+                action: routeState.pendingAction,
+                txid: routeState.pendingTxid,
+                atTs: Date.now()
+            });
+            return;
+        }
+
+        setPendingNotice(readLegacyVaultPendingNotice(vaultId));
+    }, [routeState?.pendingAction, routeState?.pendingTxid, vaultId]);
+
+    useEffect(() => {
+        if (!vaultId || typeof window === 'undefined') {
+            return;
+        }
+
+        try {
+            if (!pendingNotice) {
+                window.localStorage.removeItem(legacyVaultPendingNoticeStorageKey(vaultId));
+                return;
+            }
+
+            window.localStorage.setItem(legacyVaultPendingNoticeStorageKey(vaultId), JSON.stringify(pendingNotice));
+        } catch {
+            // Ignore localStorage failures in restricted extension contexts.
+        }
+    }, [pendingNotice, vaultId]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadViewerAddress = async () => {
+            try {
+                const signerAddress = await wallet.legacyVault_getSignerAddress();
+                if (!cancelled) {
+                    setViewerAddress(normalizeLegacyVaultAddress(signerAddress || ''));
+                }
+            } catch {
+                if (!cancelled) {
+                    setViewerAddress('');
+                }
+            }
+        };
+
+        void loadViewerAddress();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [wallet]);
+
+    const viewerIsOwner = useMemo(() => {
+        if (!vault || !viewerAddress) {
+            return false;
+        }
+        return normalizeLegacyVaultAddress(vault.ownerAddress) === viewerAddress;
+    }, [vault, viewerAddress]);
+    const viewerIsHeir = useMemo(() => {
+        if (!vault || !viewerAddress) {
+            return false;
+        }
+        return vault.heirs.some((heir) => normalizeLegacyVaultAddress(heir.address) === viewerAddress);
+    }, [vault, viewerAddress]);
+    const viewerRoleLabel = useMemo(() => {
+        if (viewerIsOwner && viewerIsHeir) {
+            return 'Owner / Heir';
+        }
+        if (viewerIsOwner) {
+            return 'Owner';
+        }
+        if (viewerIsHeir) {
+            return 'Heir';
+        }
+        return 'Viewer';
+    }, [viewerIsHeir, viewerIsOwner]);
 
     const runAction = async (action: 'checkIn' | 'trigger') => {
         if (!vault) return;
+        if (action === 'checkIn' && !viewerIsOwner) {
+            tools.toastError('Check-in is only available from the owner wallet.');
+            return;
+        }
+        if (action === 'trigger' && !viewerIsHeir) {
+            tools.toastError('Trigger is only available from a registered heir wallet.');
+            return;
+        }
         setActionBusy(action);
         try {
             const result = action === 'checkIn'
@@ -128,9 +250,21 @@ export default function LegacyVaultStatusScreen() {
         }
     };
 
-    const canCheckIn = useMemo(() => vault && vault.status !== 'CLAIMED', [vault]);
-    const canTrigger = useMemo(() => vault?.status === 'OVERDUE', [vault]);
+    const canCheckIn = useMemo(() => Boolean(vault && vault.status !== 'CLAIMED'), [vault]);
+    const canTrigger = useMemo(() => {
+        if (!vault) {
+            return false;
+        }
+
+        if (vault.status === 'OVERDUE') {
+            return true;
+        }
+
+        return vault.status === 'ACTIVE' && vault.nextDeadlineTs > 0 && Date.now() >= vault.nextDeadlineTs;
+    }, [vault]);
     const canClaim = useMemo(() => vault?.status === 'CLAIMABLE', [vault]);
+    const showCheckIn = viewerIsOwner;
+    const showHeirActions = viewerIsHeir;
     const pendingTxUrl = useMemo(() => legacyVaultTxExplorerUrl(pendingNotice?.txid), [pendingNotice?.txid]);
 
     const renderTxRef = (txid?: string) => {
@@ -267,6 +401,8 @@ export default function LegacyVaultStatusScreen() {
                         </div>
                         <div style={{ color: lvColors.textMuted }}>Mode</div>
                         <div style={{ color: lvColors.text, textAlign: 'right' }}>OP_NET-managed</div>
+                        <div style={{ color: lvColors.textMuted }}>Viewing As</div>
+                        <div style={{ color: lvColors.text, textAlign: 'right' }}>{viewerRoleLabel}</div>
                     </div>
                 </div>
 
@@ -295,7 +431,7 @@ export default function LegacyVaultStatusScreen() {
 
                 <div style={{ ...panelStyle, marginBottom: '12px' }}>
                     <div style={{ color: lvColors.text, fontWeight: 700, fontSize: '13px', marginBottom: '8px' }}>
-                        Demo Transaction References
+                        Transaction References
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 10px', fontSize: '10px' }}>
                         <div style={{ color: lvColors.textMuted }}>Create Tx</div>
@@ -313,25 +449,38 @@ export default function LegacyVaultStatusScreen() {
                     <button style={secondaryButtonStyle} onClick={() => void loadVault()}>
                         Refresh
                     </button>
-                    <button
-                        style={withDisabledButtonStyle(secondaryButtonStyle, !canCheckIn || actionBusy !== null)}
-                        disabled={!canCheckIn || actionBusy !== null}
-                        onClick={() => void runAction('checkIn')}>
-                        {actionBusy === 'checkIn' ? 'Checking in...' : 'Check in'}
-                    </button>
-                    <button
-                        style={withDisabledButtonStyle(secondaryButtonStyle, !canTrigger || actionBusy !== null)}
-                        disabled={!canTrigger || actionBusy !== null}
-                        onClick={() => void runAction('trigger')}>
-                        {actionBusy === 'trigger' ? 'Triggering...' : 'Trigger'}
-                    </button>
-                    <button
-                        style={withDisabledButtonStyle(primaryButtonStyle, !canClaim)}
-                        disabled={!canClaim}
-                        onClick={() => navigate(RouteTypes.LegacyVaultClaimScreen, { vaultId: vault.vaultId })}>
-                        Claim
-                    </button>
+                    {showCheckIn && (
+                        <button
+                            style={withDisabledButtonStyle(secondaryButtonStyle, !canCheckIn || actionBusy !== null)}
+                            disabled={!canCheckIn || actionBusy !== null}
+                            onClick={() => void runAction('checkIn')}>
+                            {actionBusy === 'checkIn' ? 'Checking in...' : 'Check in'}
+                        </button>
+                    )}
+                    {showHeirActions && (
+                        <button
+                            style={withDisabledButtonStyle(secondaryButtonStyle, !canTrigger || actionBusy !== null)}
+                            disabled={!canTrigger || actionBusy !== null}
+                            onClick={() => void runAction('trigger')}>
+                            {actionBusy === 'trigger' ? 'Triggering...' : 'Trigger'}
+                        </button>
+                    )}
+                    {showHeirActions && (
+                        <button
+                            style={withDisabledButtonStyle(primaryButtonStyle, !canClaim)}
+                            disabled={!canClaim}
+                            onClick={() => navigate(RouteTypes.LegacyVaultClaimScreen, { vaultId: vault.vaultId })}>
+                            Claim
+                        </button>
+                    )}
                 </div>
+                {!viewerIsOwner && !viewerIsHeir && (
+                    <div style={{ ...panelStyle, marginTop: '12px', border: `1px solid ${lvColors.info}44` }}>
+                        <div style={{ color: lvColors.info, fontSize: '11px', lineHeight: 1.4 }}>
+                            This wallet is not the vault owner or a registered heir. You can view status, but lifecycle actions are hidden.
+                        </div>
+                    </div>
+                )}
             </div>
         </Layout>
     );

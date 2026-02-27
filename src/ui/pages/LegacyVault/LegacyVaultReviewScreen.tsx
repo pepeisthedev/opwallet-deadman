@@ -147,22 +147,6 @@ export default function LegacyVaultReviewScreen() {
                     </div>
                 </div>
 
-                <div
-                    style={{
-                        ...panelStyle,
-                        marginBottom: '12px',
-                        border: `1px solid ${lvColors.warning}44`,
-                        background: 'rgba(251, 191, 36, 0.06)'
-                    }}>
-                    <div style={{ color: lvColors.warning, fontWeight: 700, fontSize: '12px', marginBottom: '6px' }}>
-                        OP_NET / P2OP Trust Model Warning
-                    </div>
-                    <div style={{ color: lvColors.textMuted, fontSize: '11px', lineHeight: 1.4 }}>
-                        This MVP is a demo-first OP_NET-managed Legacy Vault path. Bitcoin L1 consensus does not enforce this
-                        vault policy in the current implementation. A user-triggered transaction/action is still required.
-                    </div>
-                </div>
-
                 <div style={{ display: 'flex', gap: '8px' }}>
                     <button style={primaryButtonStyle} onClick={() => void handleCreate()} disabled={creating}>
                         {creating ? 'Creating...' : 'Create Vault'}

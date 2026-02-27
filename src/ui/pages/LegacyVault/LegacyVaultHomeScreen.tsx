@@ -11,6 +11,7 @@ import {
     formatSats,
     formatTimestamp,
     lvColors,
+    normalizeLegacyVaultAddress,
     pageContainerStyle,
     panelStyle,
     primaryButtonStyle,
@@ -26,6 +27,7 @@ export default function LegacyVaultHomeScreen() {
     const setSelectedVaultId = useSetSelectedLegacyVaultId();
 
     const [vaults, setVaults] = useState<LegacyVaultSummary[]>([]);
+    const [vaultRoleMap, setVaultRoleMap] = useState<Record<string, { isOwner: boolean; isHeir: boolean }>>({});
     const [loading, setLoading] = useState(true);
     const [busyVaultId, setBusyVaultId] = useState<string | null>(null);
 
@@ -34,8 +36,29 @@ export default function LegacyVaultHomeScreen() {
         try {
             const list = await wallet.legacyVault_listVaults();
             setVaults(list);
+            const signerAddress = await wallet.legacyVault_getSignerAddress().catch(() => null);
+            const currentAddress = normalizeLegacyVaultAddress(signerAddress || '');
+            if (!currentAddress || list.length === 0) {
+                setVaultRoleMap({});
+                return;
+            }
+
+            const detailsList = await Promise.all(list.map((vault) => wallet.legacyVault_getVault(vault.vaultId).catch(() => null)));
+            const nextRoleMap: Record<string, { isOwner: boolean; isHeir: boolean }> = {};
+            detailsList.forEach((details, index) => {
+                if (!details) {
+                    return;
+                }
+
+                nextRoleMap[list[index].vaultId] = {
+                    isOwner: normalizeLegacyVaultAddress(details.ownerAddress) === currentAddress,
+                    isHeir: details.heirs.some((heir) => normalizeLegacyVaultAddress(heir.address) === currentAddress)
+                };
+            });
+            setVaultRoleMap(nextRoleMap);
         } catch (error) {
             console.error(error);
+            setVaultRoleMap({});
         } finally {
             setLoading(false);
         }
@@ -43,6 +66,14 @@ export default function LegacyVaultHomeScreen() {
 
     useEffect(() => {
         void loadVaults();
+    }, [loadVaults]);
+
+    useEffect(() => {
+        const timer = window.setInterval(() => {
+            void loadVaults();
+        }, 15000);
+
+        return () => window.clearInterval(timer);
     }, [loadVaults]);
 
     const runAction = async (vaultId: string, action: 'checkIn' | 'trigger' | 'claim') => {
@@ -87,21 +118,6 @@ export default function LegacyVaultHomeScreen() {
         <Layout>
             <Header onBack={() => window.history.go(-1)} title="Legacy Vault" />
             <div style={pageContainerStyle}>
-                <div
-                    style={{
-                        ...panelStyle,
-                        background: 'linear-gradient(135deg, rgba(243, 116, 19, 0.12), rgba(96, 165, 250, 0.08))',
-                        marginBottom: '12px'
-                    }}>
-                    <div style={{ color: lvColors.text, fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>
-                        OP_NET-managed MVP (Demo Mode)
-                    </div>
-                    <div style={{ color: lvColors.textMuted, fontSize: '11px', lineHeight: 1.4 }}>
-                        This MVP stores vault state locally in the wallet for demo reliability. The UI and controller API are
-                        ready for OP_NET contract integration next.
-                    </div>
-                </div>
-
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
                     <button style={primaryButtonStyle} onClick={() => navigate(RouteTypes.LegacyVaultCreateScreen)}>
                         Create Vault
@@ -115,13 +131,19 @@ export default function LegacyVaultHomeScreen() {
                     <div style={{ ...panelStyle, color: lvColors.textMuted, fontSize: '12px' }}>Loading vaults...</div>
                 ) : vaults.length === 0 ? (
                     <div style={{ ...panelStyle, color: lvColors.textMuted, fontSize: '12px', lineHeight: 1.5 }}>
-                        No Legacy Vaults yet. Create one with a short interval (for example 1 minute + 1 minute grace) to
-                        demo missed check-in -&gt; trigger -&gt; claim in one session.
+                        No Legacy Vaults yet. Create one with a short interval (for example 1 minute + 1 minute grace) if
+                        you want to test the full check-in -&gt; trigger -&gt; claim flow quickly.
                     </div>
                 ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                         {vaults.map((vault) => {
                             const isBusy = busyVaultId === vault.vaultId;
+                            const role = vaultRoleMap[vault.vaultId];
+                            const showCheckIn = Boolean(role?.isOwner);
+                            const showHeirActions = Boolean(role?.isHeir);
+                            const canTrigger =
+                                vault.status === 'OVERDUE' ||
+                                (vault.status === 'ACTIVE' && vault.nextDeadlineTs > 0 && Date.now() >= vault.nextDeadlineTs);
                             return (
                                 <div key={vault.vaultId} style={panelStyle}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
@@ -183,27 +205,33 @@ export default function LegacyVaultHomeScreen() {
                                             }}>
                                             View
                                         </button>
-                                        <button
-                                            style={withDisabledButtonStyle(secondaryButtonStyle, isBusy || vault.status === 'CLAIMED')}
-                                            disabled={isBusy || vault.status === 'CLAIMED'}
-                                            onClick={() => void runAction(vault.vaultId, 'checkIn')}>
-                                            Check in
-                                        </button>
-                                        <button
-                                            style={withDisabledButtonStyle(secondaryButtonStyle, isBusy || vault.status !== 'OVERDUE')}
-                                            disabled={isBusy || vault.status !== 'OVERDUE'}
-                                            onClick={() => void runAction(vault.vaultId, 'trigger')}>
-                                            Trigger
-                                        </button>
-                                        <button
-                                            style={withDisabledButtonStyle(secondaryButtonStyle, isBusy || vault.status !== 'CLAIMABLE')}
-                                            disabled={isBusy || vault.status !== 'CLAIMABLE'}
-                                            onClick={() => {
-                                                setSelectedVaultId(vault.vaultId);
-                                                navigate(RouteTypes.LegacyVaultClaimScreen, { vaultId: vault.vaultId });
-                                            }}>
-                                            Claim
-                                        </button>
+                                        {showCheckIn && (
+                                            <button
+                                                style={withDisabledButtonStyle(secondaryButtonStyle, isBusy || vault.status === 'CLAIMED')}
+                                                disabled={isBusy || vault.status === 'CLAIMED'}
+                                                onClick={() => void runAction(vault.vaultId, 'checkIn')}>
+                                                Check in
+                                            </button>
+                                        )}
+                                        {showHeirActions && (
+                                            <button
+                                                style={withDisabledButtonStyle(secondaryButtonStyle, isBusy || !canTrigger)}
+                                                disabled={isBusy || !canTrigger}
+                                                onClick={() => void runAction(vault.vaultId, 'trigger')}>
+                                                Trigger
+                                            </button>
+                                        )}
+                                        {showHeirActions && (
+                                            <button
+                                                style={withDisabledButtonStyle(secondaryButtonStyle, isBusy || vault.status !== 'CLAIMABLE')}
+                                                disabled={isBusy || vault.status !== 'CLAIMABLE'}
+                                                onClick={() => {
+                                                    setSelectedVaultId(vault.vaultId);
+                                                    navigate(RouteTypes.LegacyVaultClaimScreen, { vaultId: vault.vaultId });
+                                                }}>
+                                                Claim
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                             );
